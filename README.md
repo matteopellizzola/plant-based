@@ -280,16 +280,91 @@ Le istruzioni per installare l'hub sono in [`hub/README.md`](hub/README.md).
 Il broker del Raspberry usa l'indirizzo `192.168.1.10`; aggiorna lo stesso
 indirizzo in `include/secrets.h` prima di caricare il firmware.
 
-### Fase 4 — Dal primo nodo ai quattro nodi
+### Fase 4 — Dati utili e identita' delle piante
+
+- [ ] Salvare lo storico completo delle misure con timestamp, invece di
+      conservare soltanto l'ultimo valore
+- [ ] Dare un nome leggibile a ciascun nodo (ad esempio `Balcone nord` o
+      `Serra`), mantenendo comunque il suo ID tecnico MQTT
+- [ ] Dare un nome leggibile a ciascun vaso/canale (ad esempio `Basilico
+      cucina` o `Aloe balcone`), collegandolo al nodo corretto
+- [ ] Registrare per ogni vaso specie, posizione e note opzionali
+- [ ] Implementare il monitoraggio della temperatura dell'aria per nodo,
+      conservando minimo, massimo, media e andamento giornaliero
+- [ ] Implementare il sensore BH1750 e misurare l'esposizione luminosa in lux,
+      con durata e variazione dell'esposizione durante la giornata
+- [ ] Inserire temperatura ed esposizione nel recap Telegram giornaliero delle
+      08:00, evidenziando valori mancanti, anomali o fuori dai limiti configurati
+- [ ] Analizzare temperatura, umidita' dell'aria ed esposizione per descrivere
+      l'ambiente circostante e individuare condizioni persistenti sfavorevoli
+      alle piante
+- [ ] Distinguere sensore non configurato, dato vecchio, nodo offline e dato
+      anomalo: nessuno di questi casi deve causare un consiglio di irrigazione
+- [ ] Aggiungere comandi o configurazione per impostare nome del vaso, soglia,
+      durata minima tra due avvisi e fascia oraria di notifica
+- [ ] Esporre riepiloghi giornalieri e andamento delle ultime 24 ore/7 giorni,
+      con umidita' minima, massima, media e ultima lettura
+- [ ] Registrare l'evento di irrigazione (manuale o automatico), quantita' o
+      durata e note, per confrontare l'azione con la risposta del terreno
+
+### Fase 5 — Avvisi e supervisione semiautomatica
+
+- [ ] Creare un motore di alert per vaso: se l'umidita' resta sotto la soglia
+      per piu' di 1 ora, inviare un warning Telegram indicando pianta, nodo,
+      canale, valore attuale, soglia e ora d'inizio del problema
+- [ ] Eseguire automaticamente il controllo degli alert tramite un job `cron`
+      o scheduler persistente sul Raspberry, senza dipendere da un comando
+      Telegram manuale
+- [ ] Usare isteresi, cooldown e deduplicazione: un warning non va ripetuto a
+      ogni misura e si deve inviare un messaggio di rientro quando il valore
+      torna sopra la soglia
+- [ ] Non notificare durante un'interruzione del nodo o con letture stale;
+      inviare invece un avviso distinto per nodo offline o sensore guasto
+- [ ] Aggiungere una coda di notifiche persistente e riprovare gli invii
+      Telegram falliti senza perdere gli alert
+- [ ] Consentire di marcare un alert come `visto`, `irrigato` o `rimandato`,
+      mantenendo lo stato nel database
+- [ ] Proporre `/irrigare NOME` come richiesta di azione con conferma esplicita,
+      senza attivare pompe finche' l'utente non conferma
+
+### Fase 6 — Telegram semplice per utenti non tecnici
+
+- [ ] Pubblicare una mappa completa dei comandi con `/help` e descrizioni in
+      linguaggio naturale, senza richiedere conoscenza di nodi, topic o canali
+- [ ] Implementare almeno: `/start`, `/help`, `/piante` o `/status`,
+      `/pianta NOME`, `/problemi`, `/storico NOME [24h|7g]`, `/irrigare NOME`,
+      `/conferma`, `/rimanda`, `/impostazioni` e `/whoami`
+- [ ] Preferire pulsanti inline e menu Telegram per scegliere pianta, azione e
+      conferma; mantenere i comandi testuali come alternativa
+- [ ] Rispondere con messaggi orientati all'azione: cosa sta succedendo, quanto
+      e' umido, da quando, cosa si consiglia e quale risposta e' possibile
+- [ ] Aggiungere `/annulla` e gestione sicura degli errori per comandi incompleti,
+      pianta inesistente, nodo offline o calibrazione non valida
+- [ ] Separare i permessi: consultazione per tutti gli utenti autorizzati,
+      modifica impostazioni e irrigazione soltanto per gli amministratori
+- [ ] Configurare orari silenziosi, preferenze per pianta e riepilogo quotidiano
+      senza nascondere gli alert critici
+- [ ] Inviare automaticamente ogni mattina alle 08:00 un recap Telegram con
+      stato dei nodi, vasi sotto soglia, nodi offline, ultime letture e azioni
+      consigliate
+- [ ] Rendere configurabili ora e fuso orario del recap, evitando invii doppi
+      dopo riavvii o cambi d'ora legale
+
+### Fase 7 — Dal primo nodo ai quattro nodi
 
 - [ ] Parametrizzare ID, canali e nomi dei vasi senza duplicare il firmware
 - [ ] Assemblare e testare nodi `plant-node-02`, `03` e `04`
 - [ ] Pagina/stato Telegram che raggruppa tutti i nodi
 - [ ] Avvisi basati su soglie specifiche per vaso e pianta
 
-### Fase 5 — Irrigazione, solo dopo i dati
+### Fase 8 — Irrigazione controllata, solo dopo i dati
 
 - [ ] Irrigazione manuale comandata dal Raspberry Pi
-- [ ] Modalita' semi-automatica con conferma Telegram
-- [ ] Automazione completa con limiti di sicurezza, tempi minimi e blocco in
-      caso di dati anomali
+- [ ] Modalita' semi-automatica: proposta Telegram, conferma dell'utente,
+      attivazione per durata limitata e registrazione dell'esito
+- [ ] Verificare dopo l'irrigazione che l'umidita' sia salita; segnalare
+      serbatoio vuoto, pompa bloccata o assenza di risposta del sensore
+- [ ] Aggiungere limiti di sicurezza: durata massima, pausa minima tra cicli,
+      numero massimo giornaliero, arresto manuale e blocco con dati anomali
+- [ ] Solo alla fine valutare l'automazione completa, con modalita' manuale,
+      simulazione e pulsante di arresto sempre disponibili
