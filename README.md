@@ -269,12 +269,16 @@ riporta ai valori iniziali di `config.h`.
 
 ### Fase 3 — Raspberry Pi: hub centrale
 
-- [ ] Installazione del broker MQTT sul Raspberry Pi
-- [ ] Servizio hub che riceve i dati dei nodi
-- [ ] Storico delle misure e visualizzazione dello stato dei vasi
-- [ ] Bot Telegram ospitato sul Raspberry Pi, limitato al chat ID autorizzato
-- [ ] Comandi Telegram → hub → MQTT → nodo, ad esempio calibrazione dry/wet,
+- [x] Installazione del broker MQTT sul Raspberry Pi
+- [x] Servizio hub che riceve i dati dei nodi
+- [x] Storico locale delle ultime misure e stato dei nodi in SQLite
+- [x] Bot Telegram ospitato sul Raspberry Pi, con più utenti autorizzabili
+- [x] Comandi Telegram → hub → MQTT → nodo, ad esempio calibrazione dry/wet,
       soglie e richiesta dello stato
+
+Le istruzioni per installare l'hub sono in [`hub/README.md`](hub/README.md).
+Il broker del Raspberry usa l'indirizzo `192.168.1.10`; aggiorna lo stesso
+indirizzo in `include/secrets.h` prima di caricare il firmware.
 
 ### Fase 4 — Dal primo nodo ai quattro nodi
 

@@ -1,5 +1,8 @@
 # Credenziali locali: non devono finire nel repository.
 include/secrets.h
+hub/.env
+hub/data/
+hub/__pycache__/
 
 # Cartelle generate da PlatformIO e dagli editor.
 .pio/
