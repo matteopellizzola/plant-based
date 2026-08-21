@@ -3,6 +3,7 @@
 
 #include "ads1115_sensor.h"
 #include "config.h"
+#include "mqtt_manager.h"
 #include "sht31_sensor.h"
 #include "soil_calibration.h"
 #include "wifi_manager.h"
@@ -51,12 +52,14 @@ void setup() {
   sht31_sensor::begin();
   ads1115_sensor::begin();
   wifi_manager::begin();
+  mqtt_manager::begin();
 }
 
 void loop() {
   // Il loop resta sempre libero: ogni modulo aggiorna il proprio stato senza
   // bloccare gli altri. Sarà essenziale quando avremo sensori e MQTT insieme.
   wifi_manager::update();
+  mqtt_manager::update();
   sht31_sensor::update();
   ads1115_sensor::update();
   soil_calibration::update();

@@ -9,15 +9,15 @@ namespace sht31_sensor {
 namespace {
 
 Adafruit_SHT31 sensor;
-bool available = false;
+Reading reading = {false, false, NAN, NAN, 0};
 uint32_t lastReadMs = 0;
 
 }  // namespace
 
 void begin() {
-  available = sensor.begin(config::SHT31_ADDRESS);
+  reading.available = sensor.begin(config::SHT31_ADDRESS);
 
-  if (available) {
+  if (reading.available) {
     Serial.printf("[SHT31] Pronto all'indirizzo 0x%02X.\n",
                   config::SHT31_ADDRESS);
   } else {
@@ -26,21 +26,26 @@ void begin() {
 }
 
 void update() {
-  if (!available || millis() - lastReadMs < config::SENSOR_READ_INTERVAL_MS) {
+  if (!reading.available || millis() - lastReadMs < config::SENSOR_READ_INTERVAL_MS) {
     return;
   }
   lastReadMs = millis();
 
-  const float temperatureC = sensor.readTemperature();
-  const float humidityPercent = sensor.readHumidity();
+  reading.temperatureC = sensor.readTemperature();
+  reading.humidityPercent = sensor.readHumidity();
 
-  if (isnan(temperatureC) || isnan(humidityPercent)) {
+  if (isnan(reading.temperatureC) || isnan(reading.humidityPercent)) {
+    reading.valid = false;
     Serial.println("[SHT31] Lettura non valida.");
     return;
   }
+  reading.valid = true;
+  reading.measuredAt = millis();
 
   Serial.printf("[SHT31] Temperatura: %.2f C | Umidita': %.2f %%\n",
-                temperatureC, humidityPercent);
+                reading.temperatureC, reading.humidityPercent);
 }
+
+const Reading& getReading() { return reading; }
 
 }  // namespace sht31_sensor

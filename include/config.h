@@ -16,6 +16,8 @@ constexpr uint32_t SERIAL_BAUD_RATE = 115200;
 constexpr uint32_t I2C_FREQUENCY_HZ = 100000;
 constexpr uint32_t WIFI_RETRY_INTERVAL_MS = 10000;
 constexpr uint32_t SENSOR_READ_INTERVAL_MS = 2000;
+constexpr uint32_t MQTT_RETRY_INTERVAL_MS = 10000;
+constexpr uint32_t MQTT_PUBLISH_INTERVAL_MS = 10000;
 
 // Indirizzi I2C scelti tramite i pin AD/ADDR dei moduli.
 constexpr uint8_t SHT31_ADDRESS = 0x44;

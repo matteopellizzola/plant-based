@@ -16,6 +16,8 @@ void begin();
 
 const Values& get(uint8_t channel);
 float moisturePercent(uint8_t channel, float voltage);
+bool set(uint8_t channel, const Values& values);
+void resetChannel(uint8_t channel);
 
 // Gestisce i comandi ricevuti dalla porta seriale, senza bloccare il loop.
 void update();

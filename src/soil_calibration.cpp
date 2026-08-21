@@ -31,6 +31,11 @@ bool validPair(float dryVoltage, float wetVoltage) {
          fabsf(dryVoltage - wetVoltage) >= MIN_CALIBRATION_RANGE_V;
 }
 
+bool validValues(const Values& values) {
+  return validPair(values.dryVoltage, values.wetVoltage) &&
+         values.thresholdPercent >= 0.0F && values.thresholdPercent <= 100.0F;
+}
+
 bool parseChannel(const char* token, uint8_t* channel) {
   if (token == nullptr || token[0] != 'A' || token[2] != '\0' ||
       token[1] < '0' || token[1] > '3') {
@@ -157,10 +162,7 @@ void begin() {
     keyFor('t', channel, key);
     calibrations[channel].thresholdPercent =
         preferences.getFloat(key, calibrations[channel].thresholdPercent);
-    if (!validPair(calibrations[channel].dryVoltage,
-                   calibrations[channel].wetVoltage) ||
-        calibrations[channel].thresholdPercent < 0.0F ||
-        calibrations[channel].thresholdPercent > 100.0F) {
+    if (!validValues(calibrations[channel])) {
       calibrations[channel] = defaults();
       Serial.printf("[CAL] A%u: valori NVS non validi, uso valori iniziali.\n", channel);
     }
@@ -171,6 +173,27 @@ void begin() {
 
 const Values& get(uint8_t channel) {
   return calibrations[channel < CHANNEL_COUNT ? channel : 0];
+}
+
+bool set(uint8_t channel, const Values& values) {
+  if (channel >= CHANNEL_COUNT || !validValues(values)) {
+    return false;
+  }
+  calibrations[channel] = values;
+  char key[3];
+  keyFor('d', channel, key);
+  preferences.putFloat(key, values.dryVoltage);
+  keyFor('w', channel, key);
+  preferences.putFloat(key, values.wetVoltage);
+  keyFor('t', channel, key);
+  preferences.putFloat(key, values.thresholdPercent);
+  return true;
+}
+
+void resetChannel(uint8_t channel) {
+  if (channel < CHANNEL_COUNT) {
+    reset(channel);
+  }
 }
 
 float moisturePercent(uint8_t channel, float voltage) {

@@ -55,6 +55,118 @@ Il progetto usa [PlatformIO](https://platformio.org/) con framework Arduino.
 5. Compila e carica il firmware.
 6. Apri il monitor seriale a 115200 baud.
 
+### Configurazione MQTT
+
+Per abilitare la comunicazione, aggiungi in `include/secrets.h` le quattro
+impostazioni MQTT presenti in `include/secrets.example.h`: host del broker,
+porta e, se necessari, username e password. Se `MQTT_BROKER_HOST` resta vuoto
+o non viene definito, il nodo continua a funzionare offline.
+
+Il nodo usa questi topic:
+
+- `plants/plant-node-01/state`: stato `online`/`offline`, inviato retained;
+- `plants/plant-node-01/measurements`: misure SHT31 e ADS1115 ogni 10 secondi;
+- `plants/plant-node-01/config`: comandi JSON di calibrazione.
+
+Esempi di messaggi da pubblicare su `config`:
+
+```json
+{"channel":0,"dry":2.700,"wet":1.250,"threshold":35}
+```
+
+Il messaggio aggiorna solo i campi presenti e li salva in NVS. Per ripristinare
+il canale ai valori iniziali:
+
+```json
+{"channel":0,"reset":true}
+```
+
+Il Last Will MQTT pubblica `state=offline` se il nodo perde la connessione
+senza poter chiudere la sessione. Wi-Fi, sensori e calibrazioni continuano a
+funzionare indipendentemente dalla disponibilita' del broker.
+
+### Broker MQTT locale su macOS
+
+Per installare Mosquitto con Homebrew:
+
+```bash
+brew install mosquitto
+```
+
+Per un test locale con log visibili, avvia il broker manualmente:
+
+```bash
+mosquitto -v
+```
+
+Il broker ascolta sulla porta `1883`. Lascia questa finestra aperta e, in un
+secondo terminale, ascolta i messaggi del nodo:
+
+```bash
+mosquitto_sub -h localhost -p 1883 -t 'plants/#' -v
+```
+
+Per ricevere i messaggi dall'ESP32, il broker deve accettare connessioni dalla
+rete locale. Se Mosquitto stampa un avviso sulla configurazione del listener,
+crea `~/mosquitto-debug.conf` con:
+
+```text
+listener 1883 0.0.0.0
+allow_anonymous true
+persistence false
+log_type all
+```
+
+Avvialo con:
+
+```bash
+mosquitto -c ~/mosquitto-debug.conf -v
+```
+
+Trova l'indirizzo IP del Mac e riportalo in `MQTT_BROKER_HOST` dentro
+`include/secrets.h`:
+
+```bash
+ipconfig getifaddr en0
+```
+
+Per esempio, se il comando restituisce `192.168.1.20`:
+
+```cpp
+#define MQTT_BROKER_HOST "192.168.1.20"
+#define MQTT_BROKER_PORT 1883
+```
+
+In questo caso puoi ascoltare anche usando l'indirizzo del Mac:
+
+```bash
+mosquitto_sub -h 192.168.1.20 -p 1883 -t 'plants/#' -v
+```
+
+Per inviare una calibrazione dal Mac:
+
+```bash
+mosquitto_pub -h 192.168.1.20 -p 1883 \
+      -t 'plants/plant-node-01/config' \
+      -m '{"channel":0,"threshold":40}'
+```
+
+Per avviare Mosquitto come servizio in background:
+
+```bash
+brew services start mosquitto
+```
+
+Per fermarlo o controllarne lo stato:
+
+```bash
+brew services stop mosquitto
+brew services list
+```
+
+`allow_anonymous true` e' adatto solo al debug nella rete locale: non esporre
+questa configurazione su Internet.
+
 Le credenziali reali non vengono salvate nel repository perché `secrets.h` è
 presente in `.gitignore`.
 
@@ -149,10 +261,10 @@ riporta ai valori iniziali di `config.h`.
 
 ### Fase 2 — Comunicazione del primo nodo
 
-- [ ] Client MQTT sul nodo `plant-node-01`
-- [ ] Pubblicazione periodica di misure, percentuali e stato del nodo
-- [ ] Ricezione di configurazioni MQTT, inclusa la calibrazione dei vasi
-- [ ] Il nodo continua a misurare con le ultime calibrazioni anche se Wi-Fi,
+- [x] Client MQTT sul nodo `plant-node-01`
+- [x] Pubblicazione periodica di misure, percentuali e stato del nodo
+- [x] Ricezione di configurazioni MQTT, inclusa la calibrazione dei vasi
+- [x] Il nodo continua a misurare con le ultime calibrazioni anche se Wi-Fi,
       Raspberry o MQTT non sono disponibili
 
 ### Fase 3 — Raspberry Pi: hub centrale
