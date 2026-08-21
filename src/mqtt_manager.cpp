@@ -174,6 +174,7 @@ void begin() {
     return;
   }
   client.setServer(MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+  client.setBufferSize(1024);
   client.setCallback(callback);
 }
 

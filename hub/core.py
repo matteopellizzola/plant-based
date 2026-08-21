@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,7 +58,8 @@ def topic_parts(topic: str, prefix: str) -> tuple[str, str] | None:
 class Store:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(path)
+        self.connection = sqlite3.connect(path, check_same_thread=False)
+        self.lock = threading.Lock()
         self.connection.execute(
             """CREATE TABLE IF NOT EXISTS node_messages (
                 node TEXT NOT NULL,
@@ -70,21 +72,23 @@ class Store:
         self.connection.commit()
 
     def save(self, node: str, kind: str, payload: dict[str, Any]) -> None:
-        self.connection.execute(
-            """INSERT INTO node_messages(node, kind, payload, received_at)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(node, kind) DO UPDATE SET
-                 payload=excluded.payload, received_at=excluded.received_at""",
-            (node, kind, json.dumps(payload, ensure_ascii=True), utc_now()),
-        )
-        self.connection.commit()
+        with self.lock:
+            self.connection.execute(
+                """INSERT INTO node_messages(node, kind, payload, received_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(node, kind) DO UPDATE SET
+                     payload=excluded.payload, received_at=excluded.received_at""",
+                (node, kind, json.dumps(payload, ensure_ascii=True), utc_now()),
+            )
+            self.connection.commit()
 
     def latest(self, node: str | None = None) -> list[tuple[str, str, dict[str, Any], str]]:
-        query = "SELECT node, kind, payload, received_at FROM node_messages"
-        parameters: tuple[str, ...] = ()
-        if node:
-            query += " WHERE node = ?"
-            parameters = (node,)
-        query += " ORDER BY node, kind"
-        rows = self.connection.execute(query, parameters).fetchall()
-        return [(row[0], row[1], json.loads(row[2]), row[3]) for row in rows]
+        with self.lock:
+            query = "SELECT node, kind, payload, received_at FROM node_messages"
+            parameters: tuple[str, ...] = ()
+            if node:
+                query += " WHERE node = ?"
+                parameters = (node,)
+            query += " ORDER BY node, kind"
+            rows = self.connection.execute(query, parameters).fetchall()
+            return [(row[0], row[1], json.loads(row[2]), row[3]) for row in rows]
