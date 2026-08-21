@@ -1,0 +1,16 @@
+[Unit]
+Description=Plant Based Raspberry hub
+After=network-online.target mosquitto.service
+Wants=network-online.target mosquitto.service
+
+[Service]
+Type=simple
+User=pellipi
+WorkingDirectory=/home/pellipi/plant-based
+ExecStart=/home/pellipi/plant-based/.venv/bin/python /home/pellipi/plant-based/hub/app.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

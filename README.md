@@ -55,6 +55,118 @@ Il progetto usa [PlatformIO](https://platformio.org/) con framework Arduino.
 5. Compila e carica il firmware.
 6. Apri il monitor seriale a 115200 baud.
 
+### Configurazione MQTT
+
+Per abilitare la comunicazione, aggiungi in `include/secrets.h` le quattro
+impostazioni MQTT presenti in `include/secrets.example.h`: host del broker,
+porta e, se necessari, username e password. Se `MQTT_BROKER_HOST` resta vuoto
+o non viene definito, il nodo continua a funzionare offline.
+
+Il nodo usa questi topic:
+
+- `plants/plant-node-01/state`: stato `online`/`offline`, inviato retained;
+- `plants/plant-node-01/measurements`: misure SHT31 e ADS1115 ogni 10 secondi;
+- `plants/plant-node-01/config`: comandi JSON di calibrazione.
+
+Esempi di messaggi da pubblicare su `config`:
+
+```json
+{"channel":0,"dry":2.700,"wet":1.250,"threshold":35}
+```
+
+Il messaggio aggiorna solo i campi presenti e li salva in NVS. Per ripristinare
+il canale ai valori iniziali:
+
+```json
+{"channel":0,"reset":true}
+```
+
+Il Last Will MQTT pubblica `state=offline` se il nodo perde la connessione
+senza poter chiudere la sessione. Wi-Fi, sensori e calibrazioni continuano a
+funzionare indipendentemente dalla disponibilita' del broker.
+
+### Broker MQTT locale su macOS
+
+Per installare Mosquitto con Homebrew:
+
+```bash
+brew install mosquitto
+```
+
+Per un test locale con log visibili, avvia il broker manualmente:
+
+```bash
+mosquitto -v
+```
+
+Il broker ascolta sulla porta `1883`. Lascia questa finestra aperta e, in un
+secondo terminale, ascolta i messaggi del nodo:
+
+```bash
+mosquitto_sub -h localhost -p 1883 -t 'plants/#' -v
+```
+
+Per ricevere i messaggi dall'ESP32, il broker deve accettare connessioni dalla
+rete locale. Se Mosquitto stampa un avviso sulla configurazione del listener,
+crea `~/mosquitto-debug.conf` con:
+
+```text
+listener 1883 0.0.0.0
+allow_anonymous true
+persistence false
+log_type all
+```
+
+Avvialo con:
+
+```bash
+mosquitto -c ~/mosquitto-debug.conf -v
+```
+
+Trova l'indirizzo IP del Mac e riportalo in `MQTT_BROKER_HOST` dentro
+`include/secrets.h`:
+
+```bash
+ipconfig getifaddr en0
+```
+
+Per esempio, se il comando restituisce `192.168.1.20`:
+
+```cpp
+#define MQTT_BROKER_HOST "192.168.1.20"
+#define MQTT_BROKER_PORT 1883
+```
+
+In questo caso puoi ascoltare anche usando l'indirizzo del Mac:
+
+```bash
+mosquitto_sub -h 192.168.1.20 -p 1883 -t 'plants/#' -v
+```
+
+Per inviare una calibrazione dal Mac:
+
+```bash
+mosquitto_pub -h 192.168.1.20 -p 1883 \
+      -t 'plants/plant-node-01/config' \
+      -m '{"channel":0,"threshold":40}'
+```
+
+Per avviare Mosquitto come servizio in background:
+
+```bash
+brew services start mosquitto
+```
+
+Per fermarlo o controllarne lo stato:
+
+```bash
+brew services stop mosquitto
+brew services list
+```
+
+`allow_anonymous true` e' adatto solo al debug nella rete locale: non esporre
+questa configurazione su Internet.
+
 Le credenziali reali non vengono salvate nel repository perché `secrets.h` è
 presente in `.gitignore`.
 
@@ -149,31 +261,110 @@ riporta ai valori iniziali di `config.h`.
 
 ### Fase 2 — Comunicazione del primo nodo
 
-- [ ] Client MQTT sul nodo `plant-node-01`
-- [ ] Pubblicazione periodica di misure, percentuali e stato del nodo
-- [ ] Ricezione di configurazioni MQTT, inclusa la calibrazione dei vasi
-- [ ] Il nodo continua a misurare con le ultime calibrazioni anche se Wi-Fi,
+- [x] Client MQTT sul nodo `plant-node-01`
+- [x] Pubblicazione periodica di misure, percentuali e stato del nodo
+- [x] Ricezione di configurazioni MQTT, inclusa la calibrazione dei vasi
+- [x] Il nodo continua a misurare con le ultime calibrazioni anche se Wi-Fi,
       Raspberry o MQTT non sono disponibili
 
 ### Fase 3 — Raspberry Pi: hub centrale
 
-- [ ] Installazione del broker MQTT sul Raspberry Pi
-- [ ] Servizio hub che riceve i dati dei nodi
-- [ ] Storico delle misure e visualizzazione dello stato dei vasi
-- [ ] Bot Telegram ospitato sul Raspberry Pi, limitato al chat ID autorizzato
-- [ ] Comandi Telegram → hub → MQTT → nodo, ad esempio calibrazione dry/wet,
+- [x] Installazione del broker MQTT sul Raspberry Pi
+- [x] Servizio hub che riceve i dati dei nodi
+- [x] Storico locale delle ultime misure e stato dei nodi in SQLite
+- [x] Bot Telegram ospitato sul Raspberry Pi, con più utenti autorizzabili
+- [x] Comandi Telegram → hub → MQTT → nodo, ad esempio calibrazione dry/wet,
       soglie e richiesta dello stato
 
-### Fase 4 — Dal primo nodo ai quattro nodi
+Le istruzioni per installare l'hub sono in [`hub/README.md`](hub/README.md).
+Il broker del Raspberry usa l'indirizzo `192.168.1.10`; aggiorna lo stesso
+indirizzo in `include/secrets.h` prima di caricare il firmware.
+
+### Fase 4 — Dati utili e identita' delle piante
+
+- [ ] Salvare lo storico completo delle misure con timestamp, invece di
+      conservare soltanto l'ultimo valore
+- [ ] Dare un nome leggibile a ciascun nodo (ad esempio `Balcone nord` o
+      `Serra`), mantenendo comunque il suo ID tecnico MQTT
+- [ ] Dare un nome leggibile a ciascun vaso/canale (ad esempio `Basilico
+      cucina` o `Aloe balcone`), collegandolo al nodo corretto
+- [ ] Registrare per ogni vaso specie, posizione e note opzionali
+- [ ] Implementare il monitoraggio della temperatura dell'aria per nodo,
+      conservando minimo, massimo, media e andamento giornaliero
+- [ ] Implementare il sensore BH1750 e misurare l'esposizione luminosa in lux,
+      con durata e variazione dell'esposizione durante la giornata
+- [ ] Inserire temperatura ed esposizione nel recap Telegram giornaliero delle
+      08:00, evidenziando valori mancanti, anomali o fuori dai limiti configurati
+- [ ] Analizzare temperatura, umidita' dell'aria ed esposizione per descrivere
+      l'ambiente circostante e individuare condizioni persistenti sfavorevoli
+      alle piante
+- [ ] Distinguere sensore non configurato, dato vecchio, nodo offline e dato
+      anomalo: nessuno di questi casi deve causare un consiglio di irrigazione
+- [ ] Aggiungere comandi o configurazione per impostare nome del vaso, soglia,
+      durata minima tra due avvisi e fascia oraria di notifica
+- [ ] Esporre riepiloghi giornalieri e andamento delle ultime 24 ore/7 giorni,
+      con umidita' minima, massima, media e ultima lettura
+- [ ] Registrare l'evento di irrigazione (manuale o automatico), quantita' o
+      durata e note, per confrontare l'azione con la risposta del terreno
+
+### Fase 5 — Avvisi e supervisione semiautomatica
+
+- [ ] Creare un motore di alert per vaso: se l'umidita' resta sotto la soglia
+      per piu' di 1 ora, inviare un warning Telegram indicando pianta, nodo,
+      canale, valore attuale, soglia e ora d'inizio del problema
+- [ ] Eseguire automaticamente il controllo degli alert tramite un job `cron`
+      o scheduler persistente sul Raspberry, senza dipendere da un comando
+      Telegram manuale
+- [ ] Usare isteresi, cooldown e deduplicazione: un warning non va ripetuto a
+      ogni misura e si deve inviare un messaggio di rientro quando il valore
+      torna sopra la soglia
+- [ ] Non notificare durante un'interruzione del nodo o con letture stale;
+      inviare invece un avviso distinto per nodo offline o sensore guasto
+- [ ] Aggiungere una coda di notifiche persistente e riprovare gli invii
+      Telegram falliti senza perdere gli alert
+- [ ] Consentire di marcare un alert come `visto`, `irrigato` o `rimandato`,
+      mantenendo lo stato nel database
+- [ ] Proporre `/irrigare NOME` come richiesta di azione con conferma esplicita,
+      senza attivare pompe finche' l'utente non conferma
+
+### Fase 6 — Telegram semplice per utenti non tecnici
+
+- [ ] Pubblicare una mappa completa dei comandi con `/help` e descrizioni in
+      linguaggio naturale, senza richiedere conoscenza di nodi, topic o canali
+- [ ] Implementare almeno: `/start`, `/help`, `/piante` o `/status`,
+      `/pianta NOME`, `/problemi`, `/storico NOME [24h|7g]`, `/irrigare NOME`,
+      `/conferma`, `/rimanda`, `/impostazioni` e `/whoami`
+- [ ] Preferire pulsanti inline e menu Telegram per scegliere pianta, azione e
+      conferma; mantenere i comandi testuali come alternativa
+- [ ] Rispondere con messaggi orientati all'azione: cosa sta succedendo, quanto
+      e' umido, da quando, cosa si consiglia e quale risposta e' possibile
+- [ ] Aggiungere `/annulla` e gestione sicura degli errori per comandi incompleti,
+      pianta inesistente, nodo offline o calibrazione non valida
+- [ ] Separare i permessi: consultazione per tutti gli utenti autorizzati,
+      modifica impostazioni e irrigazione soltanto per gli amministratori
+- [ ] Configurare orari silenziosi, preferenze per pianta e riepilogo quotidiano
+      senza nascondere gli alert critici
+- [ ] Inviare automaticamente ogni mattina alle 08:00 un recap Telegram con
+      stato dei nodi, vasi sotto soglia, nodi offline, ultime letture e azioni
+      consigliate
+- [ ] Rendere configurabili ora e fuso orario del recap, evitando invii doppi
+      dopo riavvii o cambi d'ora legale
+
+### Fase 7 — Dal primo nodo ai quattro nodi
 
 - [ ] Parametrizzare ID, canali e nomi dei vasi senza duplicare il firmware
 - [ ] Assemblare e testare nodi `plant-node-02`, `03` e `04`
 - [ ] Pagina/stato Telegram che raggruppa tutti i nodi
 - [ ] Avvisi basati su soglie specifiche per vaso e pianta
 
-### Fase 5 — Irrigazione, solo dopo i dati
+### Fase 8 — Irrigazione controllata, solo dopo i dati
 
 - [ ] Irrigazione manuale comandata dal Raspberry Pi
-- [ ] Modalita' semi-automatica con conferma Telegram
-- [ ] Automazione completa con limiti di sicurezza, tempi minimi e blocco in
-      caso di dati anomali
+- [ ] Modalita' semi-automatica: proposta Telegram, conferma dell'utente,
+      attivazione per durata limitata e registrazione dell'esito
+- [ ] Verificare dopo l'irrigazione che l'umidita' sia salita; segnalare
+      serbatoio vuoto, pompa bloccata o assenza di risposta del sensore
+- [ ] Aggiungere limiti di sicurezza: durata massima, pausa minima tra cicli,
+      numero massimo giornaliero, arresto manuale e blocco con dati anomali
+- [ ] Solo alla fine valutare l'automazione completa, con modalita' manuale,
+      simulazione e pulsante di arresto sempre disponibili
