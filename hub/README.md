@@ -6,13 +6,13 @@ Il Raspberry previsto dal progetto è `192.168.1.10`.
 
 ## Installazione
 
-Dal Raspberry, dopo aver copiato il repository in `/home/pi/plantBased`:
+Dal Raspberry, dopo aver copiato il repository in `/home/pellipi/plant-based`:
 
 ```bash
 sudo apt update
 sudo apt install -y mosquitto mosquitto-clients python3-venv
 sudo systemctl enable --now mosquitto
-cd /home/pi/plantBased
+cd /home/pellipi/plant-based
 python3 -m venv .venv
 .venv/bin/pip install -r hub/requirements.txt
 cp hub/config.example.env hub/.env
@@ -64,14 +64,29 @@ Comandi disponibili agli utenti autorizzati:
 
 ## Avvio automatico
 
-Adatta `User`, `WorkingDirectory` ed `ExecStart` se il percorso o l'utente sono
-diversi da `pi`, poi installa il servizio:
+Il servizio è già configurato per l'utente `pellipi` e il percorso
+`/home/pellipi/plant-based`:
 
 ```bash
+cd /home/pellipi/plant-based
 sudo cp hub/plant-hub.service.example /etc/systemd/system/plant-hub.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now plant-hub
+sudo systemctl status plant-hub --no-pager
+```
+
+Dopo un riavvio del Raspberry il servizio partirà automaticamente. Per seguire
+i log in tempo reale:
+
+```bash
 sudo journalctl -u plant-hub -f
+```
+
+Il servizio deve risultare `active (running)`. Se fallisce, controlla il
+dettaglio con:
+
+```bash
+sudo journalctl -u plant-hub -n 100 --no-pager
 ```
 
 Il database viene creato in `hub/data/plant_hub.sqlite3`. I test del contratto
