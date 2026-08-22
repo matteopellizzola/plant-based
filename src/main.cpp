@@ -2,6 +2,7 @@
 #include <Wire.h>
 
 #include "ads1115_sensor.h"
+#include "bh1750_sensor.h"
 #include "config.h"
 #include "mqtt_manager.h"
 #include "sht31_sensor.h"
@@ -50,6 +51,7 @@ void setup() {
   // Ogni modulo verifica autonomamente la presenza del proprio dispositivo.
   soil_calibration::begin();
   sht31_sensor::begin();
+  bh1750_sensor::begin();
   ads1115_sensor::begin();
   wifi_manager::begin();
   mqtt_manager::begin();
@@ -61,6 +63,7 @@ void loop() {
   wifi_manager::update();
   mqtt_manager::update();
   sht31_sensor::update();
+  bh1750_sensor::update();
   ads1115_sensor::update();
   soil_calibration::update();
   delay(10);

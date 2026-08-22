@@ -39,9 +39,10 @@ nodi.
 2. inizializza il bus I2C sui pin SDA 21 e SCL 22;
 3. cerca e stampa gli indirizzi dei dispositivi I2C collegati;
 4. legge temperatura e umidita' dall'SHT31-D ogni due secondi;
-5. legge i quattro canali dell'ADS1115, quando collegato;
-6. tenta la connessione Wi-Fi senza bloccare il programma;
-7. continua a funzionare offline se le credenziali non sono ancora presenti.
+5. legge la luminosita' dal BH1750 in lux ogni due secondi;
+6. legge i quattro canali dell'ADS1115, quando collegato;
+7. tenta la connessione Wi-Fi senza bloccare il programma;
+8. continua a funzionare offline se le credenziali non sono ancora presenti.
 
 ## Preparazione
 
@@ -187,6 +188,35 @@ Verifica comunque le etichette stampate sul tuo modulo prima di alimentarlo.
 Per questo specifico modulo SHT31 collega inoltre `AD` a `GND`: seleziona
 l'indirizzo `0x44`. Il pin `AL` resta scollegato.
 
+## Collegamento BH1750
+
+Il BH1750 condivide il bus I2C con SHT31 e ADS1115. Collega il modulo in
+parallelo:
+
+| ESP32 | BH1750 |
+|---|---|
+| 3V3 | VCC |
+| GND | GND |
+| GPIO 21 (`D21`) | SDA |
+| GPIO 22 (`D22`) | SCL |
+
+Collega il pin `ADDR` a GND per usare l'indirizzo `0x23`, gia' impostato nel
+firmware. Se `ADDR` e' collegato a 3V3, il modulo
+usa `0x5C`: in quel caso modifica `BH1750_ADDRESS` in `include/config.h`.
+Non collegare il modulo a 5 V se il breakout non dichiara esplicitamente la
+compatibilita' con segnali I2C a 5 V.
+
+Dopo il caricamento, il monitor seriale dovrebbe mostrare:
+
+```text
+[I2C] Dispositivo trovato all'indirizzo 0x23
+[BH1750] Pronto all'indirizzo 0x23.
+[BH1750] Luminosita': 123.45 lux
+```
+
+La misura viene pubblicata nel topic `plants/plant-node-01/measurements` sotto
+`light.lux`.
+
 ## Cablaggio ADS1115 e primo test
 
 L'ADS1115 e l'SHT31 condividono lo stesso bus I2C: SDA e SCL vanno quindi
@@ -282,14 +312,14 @@ indirizzo in `include/secrets.h` prima di caricare il firmware.
 
 ### Fase 4 — Dati utili e identita' delle piante
 
-- [ ] Salvare lo storico completo delle misure con timestamp, invece di
+- [x] Salvare lo storico completo delle misure con timestamp, invece di
       conservare soltanto l'ultimo valore
-- [ ] Dare un nome leggibile a ciascun nodo (ad esempio `Balcone nord` o
+- [x] Dare un nome leggibile a ciascun nodo (ad esempio `Balcone nord` o
       `Serra`), mantenendo comunque il suo ID tecnico MQTT
-- [ ] Dare un nome leggibile a ciascun vaso/canale (ad esempio `Basilico
+- [x] Dare un nome leggibile a ciascun vaso/canale (ad esempio `Basilico
       cucina` o `Aloe balcone`), collegandolo al nodo corretto
-- [ ] Registrare per ogni vaso specie, posizione e note opzionali
-- [ ] Implementare il monitoraggio della temperatura dell'aria per nodo,
+- [x] Registrare per ogni vaso specie, posizione e note opzionali
+- [x] Implementare il monitoraggio della temperatura dell'aria per nodo,
       conservando minimo, massimo, media e andamento giornaliero
 - [ ] Implementare il sensore BH1750 e misurare l'esposizione luminosa in lux,
       con durata e variazione dell'esposizione durante la giornata
@@ -300,10 +330,15 @@ indirizzo in `include/secrets.h` prima di caricare il firmware.
       alle piante
 - [ ] Distinguere sensore non configurato, dato vecchio, nodo offline e dato
       anomalo: nessuno di questi casi deve causare un consiglio di irrigazione
-- [ ] Aggiungere comandi o configurazione per impostare nome del vaso, soglia,
-      durata minima tra due avvisi e fascia oraria di notifica
-- [ ] Esporre riepiloghi giornalieri e andamento delle ultime 24 ore/7 giorni,
-      con umidita' minima, massima, media e ultima lettura
+- [ ] Aggiungere comandi o configurazione per impostare soglia, durata minima
+      tra due avvisi e fascia oraria di notifica
+- [x] Aggiungere comandi per impostare nome del nodo e del vaso, con specie,
+      posizione e note
+- [x] Esporre riepiloghi delle ultime 24 ore/7 giorni, con umidita' minima,
+      massima, media e ultima lettura
+- [ ] Configurare durata minima tra due avvisi e fascia oraria di notifica
+- [ ] Esporre riepiloghi giornalieri completi con andamento persistente
+      dell'esposizione luminosa
 - [ ] Registrare l'evento di irrigazione (manuale o automatico), quantita' o
       durata e note, per confrontare l'azione con la risposta del terreno
 
@@ -329,17 +364,32 @@ indirizzo in `include/secrets.h` prima di caricare il firmware.
 
 ### Fase 6 — Telegram semplice per utenti non tecnici
 
-- [ ] Pubblicare una mappa completa dei comandi con `/help` e descrizioni in
+- [x] Pubblicare una mappa completa dei comandi con `/help` e descrizioni in
       linguaggio naturale, senza richiedere conoscenza di nodi, topic o canali
-- [ ] Implementare almeno: `/start`, `/help`, `/piante` o `/status`,
-      `/pianta NOME`, `/problemi`, `/storico NOME [24h|7g]`, `/irrigare NOME`,
-      `/conferma`, `/rimanda`, `/impostazioni` e `/whoami`
-- [ ] Preferire pulsanti inline e menu Telegram per scegliere pianta, azione e
-      conferma; mantenere i comandi testuali come alternativa
-- [ ] Rispondere con messaggi orientati all'azione: cosa sta succedendo, quanto
-      e' umido, da quando, cosa si consiglia e quale risposta e' possibile
-- [ ] Aggiungere `/annulla` e gestione sicura degli errori per comandi incompleti,
-      pianta inesistente, nodo offline o calibrazione non valida
+- [x] Implementare il primo gruppo consultivo: `/start`, `/help`, `/piante`,
+      `/pianta NOME`, `/stato`/`/status`, `/storico`, `/rinomina` e `/whoami`
+- [ ] Implementare `/problemi`, `/impostazioni`, `/annulla` e la gestione
+      guidata di comandi incompleti o piante inesistenti
+- [ ] Implementare `/irrigare NOME`, `/conferma` e `/rimanda` solo quando la
+      logica di irrigazione e gli alert delle fasi 5 e 8 saranno disponibili
+- [x] Creare un menu principale Telegram con pulsanti inline: `Le mie piante`,
+      `Stato nodi` e `Aiuto`
+- [x] Permettere di scegliere una pianta da un elenco di pulsanti, senza
+      richiedere nome tecnico del nodo o numero del canale
+- [x] Mostrare la schermata base della pianta con ultima umidita' disponibile,
+      nodo e canale
+- [ ] Aggiungere nella schermata della pianta i pulsanti contestuali `Storico`,
+      `Rinomina` e, quando disponibili, `Problemi` e `Irriga`
+- [ ] Gestire callback Telegram con identificativi firmati e validare sempre
+      che l'utente abbia accesso alla pianta selezionata
+- [ ] Aggiungere navigazione `Indietro`, paginazione per molte piante e
+      messaggi aggiornabili senza creare una nuova conversazione a ogni click
+- [ ] Mantenere tutti i comandi testuali come alternativa, inclusi `/help`
+      e `/whoami`
+- [x] Rispondere con messaggi leggibili mostrando umidita', temperatura,
+      umidita' dell'aria e stato del nodo quando i dati sono disponibili
+- [ ] Distinguere in modo esplicito dato mancante, dato vecchio, nodo offline,
+      sensore non configurato e lettura anomala
 - [ ] Separare i permessi: consultazione per tutti gli utenti autorizzati,
       modifica impostazioni e irrigazione soltanto per gli amministratori
 - [ ] Configurare orari silenziosi, preferenze per pianta e riepilogo quotidiano

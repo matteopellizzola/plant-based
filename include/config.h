@@ -21,6 +21,7 @@ constexpr uint32_t MQTT_PUBLISH_INTERVAL_MS = 10000;
 
 // Indirizzi I2C scelti tramite i pin AD/ADDR dei moduli.
 constexpr uint8_t SHT31_ADDRESS = 0x44;
+constexpr uint8_t BH1750_ADDRESS = 0x23;
 constexpr uint8_t ADS1115_ADDRESS = 0x48;
 
 // Calibrazione provvisoria dei sensori capacitivi alimentati a 3,3 V.

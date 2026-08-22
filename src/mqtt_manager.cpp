@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "ads1115_sensor.h"
+#include "bh1750_sensor.h"
 #include "config.h"
 #include "sht31_sensor.h"
 #include "soil_calibration.h"
@@ -59,6 +60,7 @@ void publishState(const char* state) {
   document["uptime_s"] = millis() / 1000UL;
   document["wifi"] = wifi_manager::isConnected();
   document["sht31"] = sht31_sensor::getReading().available;
+  document["bh1750"] = bh1750_sensor::getReading().available;
   document["ads1115"] = ads1115_sensor::getReading().available;
   char payload[256];
   const size_t length = serializeJson(document, payload, sizeof(payload));
@@ -69,7 +71,8 @@ void publishState(const char* state) {
 void publishMeasurements() {
   const ads1115_sensor::Reading& soil = ads1115_sensor::getReading();
   const sht31_sensor::Reading& air = sht31_sensor::getReading();
-  StaticJsonDocument<768> document;
+  const bh1750_sensor::Reading& light = bh1750_sensor::getReading();
+  StaticJsonDocument<896> document;
   document["node"] = config::NODE_ID;
   document["uptime_s"] = millis() / 1000UL;
   JsonArray soilItems = document.createNestedArray("soil");
@@ -89,8 +92,14 @@ void publishMeasurements() {
     airItem["temperature_c"] = air.temperatureC;
     airItem["humidity_percent"] = air.humidityPercent;
   }
+  JsonObject lightItem = document.createNestedObject("light");
+  lightItem["available"] = light.available;
+  lightItem["valid"] = light.valid;
+  if (light.valid) {
+    lightItem["lux"] = light.lux;
+  }
 
-  char payload[768];
+  char payload[896];
   const size_t length = serializeJson(document, payload, sizeof(payload));
   client.publish(measurementsTopic, reinterpret_cast<const uint8_t*>(payload),
                  length, false);
