@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any
 
 
+MAX_NODE_NAME_LENGTH = 64
+MAX_PLANT_NAME_LENGTH = 64
+MAX_TEXT_LENGTH = 160
+
+
 @dataclass(frozen=True)
 class Settings:
     mqtt_host: str
@@ -150,13 +155,58 @@ class Store:
         return [(row[0], json.loads(row[1]), row[2]) for row in reversed(rows)]
 
     def set_node(self, node: str, name: str) -> None:
+        self.require_node(node)
+        normalized_name = self.validate_text(name, "nome nodo", MAX_NODE_NAME_LENGTH)
         with self.lock:
             self.connection.execute(
                 """INSERT INTO node_metadata(node, name, updated_at) VALUES (?, ?, ?)
                    ON CONFLICT(node) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at""",
-                (node, name.strip(), utc_now()),
+                (node, normalized_name, utc_now()),
             )
             self.connection.commit()
+
+    @staticmethod
+    def validate_text(value: str, label: str, maximum: int) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(f"{label} non può essere vuoto")
+        if len(normalized) > maximum:
+            raise ValueError(f"{label} troppo lungo (massimo {maximum} caratteri)")
+        if any(ord(character) < 32 for character in normalized):
+            raise ValueError(f"{label} contiene caratteri non gestibili")
+        return normalized
+
+    def known_nodes(self) -> list[tuple[str, str, str | None]]:
+        with self.lock:
+            rows = self.connection.execute(
+                """SELECT nodes.node,
+                          COALESCE(metadata.name, ''),
+                          state.received_at
+                   FROM (SELECT DISTINCT node FROM node_messages) AS nodes
+                   LEFT JOIN node_metadata AS metadata ON metadata.node = nodes.node
+                   LEFT JOIN node_messages AS state
+                     ON state.node = nodes.node AND state.kind = 'state'
+                   ORDER BY nodes.node"""
+            ).fetchall()
+        return [(node, name, received_at) for node, name, received_at in rows]
+
+    def node_status(self, node: str) -> str:
+        for current_node, kind, payload, _ in self.latest(node):
+            if current_node == node and kind == "state":
+                return str(payload.get("state", "offline"))
+        return "offline"
+
+    def require_node(self, node: str) -> None:
+        if not node.strip() or not any(current == node for current, *_ in self.known_nodes()):
+            raise ValueError(
+                f"Nodo sconosciuto: {node}. Accendi il nodo e attendi il primo messaggio MQTT."
+            )
+
+    def channel_plant(self, node: str, channel: int) -> tuple[str, int, str, str, str, str, float | None] | None:
+        for plant in self.plants():
+            if plant[0] == node and plant[1] == channel:
+                return plant
+        return None
 
     def node_name(self, node: str) -> str:
         with self.lock:
@@ -175,8 +225,16 @@ class Store:
         notes: str = "",
         threshold_percent: float | None = None,
     ) -> None:
+        self.require_node(node)
         if channel not in range(4):
             raise ValueError("channel deve essere compreso tra 0 e 3")
+        normalized_name = self.validate_text(name, "nome pianta", MAX_PLANT_NAME_LENGTH)
+        normalized_species = self.validate_text(species, "specie", MAX_TEXT_LENGTH) if species.strip() else ""
+        normalized_position = self.validate_text(position, "posizione", MAX_TEXT_LENGTH) if position.strip() else ""
+        normalized_notes = self.validate_text(notes, "note", MAX_TEXT_LENGTH) if notes.strip() else ""
+        existing_name = self.find_plants(normalized_name)
+        if any(plant[:2] != (node, channel) for plant in existing_name):
+            raise ValueError(f"Esiste già una pianta chiamata {normalized_name}")
         with self.lock:
             self.connection.execute(
                 """INSERT INTO plant_metadata
@@ -186,7 +244,7 @@ class Store:
                      name=excluded.name, species=excluded.species, position=excluded.position,
                      notes=excluded.notes, threshold_percent=excluded.threshold_percent,
                      updated_at=excluded.updated_at""",
-                (node, channel, name.strip(), species.strip(), position.strip(), notes.strip(), threshold_percent, utc_now()),
+                (node, channel, normalized_name, normalized_species, normalized_position, normalized_notes, threshold_percent, utc_now()),
             )
             self.connection.commit()
 
@@ -251,6 +309,17 @@ class Store:
                     moisture.append(float(value))
                 break
         return self._summary(moisture, [])
+
+    def light_summary(self, node: str, since: str | None = None) -> dict[str, float | int | None]:
+        lux_values: list[float] = []
+        for _, payload, _ in self.history(node, since):
+            light = payload.get("light", {})
+            if not isinstance(light, dict) or not light.get("valid"):
+                continue
+            value = light.get("lux")
+            if isinstance(value, (int, float)) and value >= 0:
+                lux_values.append(float(value))
+        return self._summary(lux_values, [])
 
     @staticmethod
     def _summary(values: list[float], secondary: list[float]) -> dict[str, float | int | None]:

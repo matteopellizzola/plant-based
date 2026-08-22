@@ -39,10 +39,9 @@ nodi.
 2. inizializza il bus I2C sui pin SDA 21 e SCL 22;
 3. cerca e stampa gli indirizzi dei dispositivi I2C collegati;
 4. legge temperatura e umidita' dall'SHT31-D ogni due secondi;
-5. legge la luminosita' dal BH1750 in lux ogni due secondi;
-6. legge i quattro canali dell'ADS1115, quando collegato;
-7. tenta la connessione Wi-Fi senza bloccare il programma;
-8. continua a funzionare offline se le credenziali non sono ancora presenti.
+5. legge i quattro canali dell'ADS1115, quando collegato;
+6. tenta la connessione Wi-Fi senza bloccare il programma;
+7. continua a funzionare offline se le credenziali non sono ancora presenti.
 
 ## Preparazione
 
@@ -188,35 +187,6 @@ Verifica comunque le etichette stampate sul tuo modulo prima di alimentarlo.
 Per questo specifico modulo SHT31 collega inoltre `AD` a `GND`: seleziona
 l'indirizzo `0x44`. Il pin `AL` resta scollegato.
 
-## Collegamento BH1750
-
-Il BH1750 condivide il bus I2C con SHT31 e ADS1115. Collega il modulo in
-parallelo:
-
-| ESP32 | BH1750 |
-|---|---|
-| 3V3 | VCC |
-| GND | GND |
-| GPIO 21 (`D21`) | SDA |
-| GPIO 22 (`D22`) | SCL |
-
-Collega il pin `ADDR` a GND per usare l'indirizzo `0x23`, gia' impostato nel
-firmware. Se `ADDR` e' collegato a 3V3, il modulo
-usa `0x5C`: in quel caso modifica `BH1750_ADDRESS` in `include/config.h`.
-Non collegare il modulo a 5 V se il breakout non dichiara esplicitamente la
-compatibilita' con segnali I2C a 5 V.
-
-Dopo il caricamento, il monitor seriale dovrebbe mostrare:
-
-```text
-[I2C] Dispositivo trovato all'indirizzo 0x23
-[BH1750] Pronto all'indirizzo 0x23.
-[BH1750] Luminosita': 123.45 lux
-```
-
-La misura viene pubblicata nel topic `plants/plant-node-01/measurements` sotto
-`light.lux`.
-
 ## Cablaggio ADS1115 e primo test
 
 L'ADS1115 e l'SHT31 condividono lo stesso bus I2C: SDA e SCL vanno quindi
@@ -239,6 +209,25 @@ Per un test sicuro collega prima `A0` a `GND`: nel monitor comparira' circa
 Non collegare agli ingressi A0-A3 tensioni superiori a 3,3 V quando il modulo
 e' alimentato a 3,3 V. Gli altri canali, se lasciati scollegati, fluttuano e i
 loro valori non sono significativi.
+
+## Cablaggio BH1750 e primo test
+
+Il BH1750 condivide il bus I2C con SHT31-D e ADS1115. Collega il modulo in
+parallelo a SDA, SCL, 3V3 e GND:
+
+| ESP32 | BH1750 |
+|---|---|
+| 3V3 | VCC |
+| GND | GND |
+| GPIO 21 (`D21`) | SDA |
+| GPIO 22 (`D22`) | SCL |
+
+Lascia il pin `ADDR` scollegato per usare l'indirizzo `0x23` configurato nel
+firmware. Se il modulo collega `ADDR` a VCC, aggiorna `BH1750_ADDRESS` in
+`include/config.h` a `0x5C`. Il monitor seriale deve mostrare il dispositivo
+allo scan I2C e una riga `[BH1750] Luminosita' ... lux` ogni due secondi.
+Le misure valide vengono pubblicate nel campo `light.lux` del topic
+`measurements` e conservate nello storico dell'hub.
 
 ## Calibrazione umidita' terreno
 
@@ -285,7 +274,7 @@ riporta ai valori iniziali di `config.h`.
       iniziale condivisa)
 - [x] Calibrazione locale persistente per ogni vaso: `dry`, `wet` e soglia
       percentuale, salvati nella memoria NVS dell'ESP32
-- [ ] Lettura BH1750
+- [x] Lettura BH1750 e pubblicazione della luminosita' in lux
 - [ ] Test con tutti e quattro i sensori terreno e denominazione dei vasi
 - [ ] Stabilizzazione: media delle letture, gestione errori e log leggibili
 
@@ -314,15 +303,19 @@ indirizzo in `include/secrets.h` prima di caricare il firmware.
 
 - [x] Salvare lo storico completo delle misure con timestamp, invece di
       conservare soltanto l'ultimo valore
-- [x] Dare un nome leggibile a ciascun nodo (ad esempio `Balcone nord` o
-      `Serra`), mantenendo comunque il suo ID tecnico MQTT
-- [x] Dare un nome leggibile a ciascun vaso/canale (ad esempio `Basilico
-      cucina` o `Aloe balcone`), collegandolo al nodo corretto
+- [~] Dare un nome leggibile a ciascun nodo (ad esempio `Balcone nord` o
+      `Serra`), mantenendo comunque il suo ID tecnico MQTT; la configurazione
+      testuale attuale deve essere sostituita da un flusso guidato e validato
+- [~] Dare un nome leggibile a ciascun vaso/canale (ad esempio `Basilico
+      cucina` o `Aloe balcone`), collegandolo al nodo corretto; il wizard deve
+      impedire ID inesistenti, canali duplicati e nomi ambigui
 - [x] Registrare per ogni vaso specie, posizione e note opzionali
 - [x] Implementare il monitoraggio della temperatura dell'aria per nodo,
       conservando minimo, massimo, media e andamento giornaliero
-- [ ] Implementare il sensore BH1750 e misurare l'esposizione luminosa in lux,
-      con durata e variazione dell'esposizione durante la giornata
+- [x] Implementare il sensore BH1750 e misurare la luminosita' istantanea in lux
+- [x] Conservare nello storico e mostrare i riepiloghi min/max/media/ultima
+      lettura della luminosita'
+- [ ] Calcolare durata e variazione dell'esposizione durante la giornata
 - [ ] Inserire temperatura ed esposizione nel recap Telegram giornaliero delle
       08:00, evidenziando valori mancanti, anomali o fuori dai limiti configurati
 - [ ] Analizzare temperatura, umidita' dell'aria ed esposizione per descrivere
@@ -332,8 +325,8 @@ indirizzo in `include/secrets.h` prima di caricare il firmware.
       anomalo: nessuno di questi casi deve causare un consiglio di irrigazione
 - [ ] Aggiungere comandi o configurazione per impostare soglia, durata minima
       tra due avvisi e fascia oraria di notifica
-- [x] Aggiungere comandi per impostare nome del nodo e del vaso, con specie,
-      posizione e note
+- [~] Aggiungere comandi guidati per impostare nome del nodo e del vaso, con
+      specie, posizione e note; includere tastiere inline, conferme e `/annulla`
 - [x] Esporre riepiloghi delle ultime 24 ore/7 giorni, con umidita' minima,
       massima, media e ultima lettura
 - [ ] Configurare durata minima tra due avvisi e fascia oraria di notifica

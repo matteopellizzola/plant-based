@@ -45,9 +45,25 @@ class HubTests(unittest.TestCase):
             self.assertEqual(soil_summary["maximum"], 70)
             self.assertEqual(soil_summary["average"], 50)
 
+    def test_light_summary_uses_only_valid_nonnegative_readings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "measurements", {"light": {"valid": True, "lux": 120.5}})
+            store.save("node", "measurements", {"light": {"valid": False, "lux": 999}})
+            store.save("node", "measurements", {"light": {"valid": True, "lux": -1}})
+            store.save("node", "measurements", {"light": {"valid": True, "lux": 240.5}})
+
+            summary = store.light_summary("node")
+            self.assertEqual(summary["count"], 2)
+            self.assertEqual(summary["minimum"], 120.5)
+            self.assertEqual(summary["maximum"], 240.5)
+            self.assertEqual(summary["average"], 180.5)
+            self.assertEqual(summary["latest"], 240.5)
+
     def test_store_saves_node_and_plant_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
             store.set_node("node", "Serra")
             store.set_plant("node", 0, "Basilico", "Ocimum", "cucina", "vaso piccolo")
             store.save("node", "measurements", {"soil": [{"channel": 0, "moisture_percent": 45}]})
@@ -58,6 +74,26 @@ class HubTests(unittest.TestCase):
             self.assertEqual(store.latest_measurements("node")["soil"][0]["moisture_percent"], 45)
             self.assertEqual(store.rename_plant("BASILICO", "Basilico cucina"), 1)
             self.assertEqual(store.find_plants("basilico cucina")[0][2], "Basilico cucina")
+
+    def test_store_rejects_unknown_nodes_and_occupied_channels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            with self.assertRaisesRegex(ValueError, "Nodo sconosciuto"):
+                store.set_node("missing", "Balcone")
+            store.save("node", "state", {"state": "online"})
+            store.set_plant("node", 0, "Basilico")
+            with self.assertRaisesRegex(ValueError, "Esiste già una pianta"):
+                store.set_plant("node", 1, "Basilico")
+
+    def test_store_rejects_empty_and_duplicate_names(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            with self.assertRaises(ValueError):
+                store.set_plant("node", 0, " ")
+            store.set_plant("node", 0, "Basilico")
+            with self.assertRaisesRegex(ValueError, "Esiste già"):
+                store.set_plant("node", 1, "basilico")
 
     def test_settings_requires_token_and_authorized_users(self):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_ALLOWED_USER_IDS": ""}, clear=False):

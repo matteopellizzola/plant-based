@@ -90,12 +90,78 @@ salva nome, specie, posizione e note del canale; per mantenere semplici gli
 argomenti, usa una parola singola per nome, specie e posizione e lascia le note
 come testo finale. Le misure vengono conservate nello storico SQLite oltre alla
 cache dell'ultimo messaggio. `/storico` mostra le statistiche della temperatura
-dell'aria e, per i vasi configurati, umidita' minima, massima, media e ultima
-lettura nel periodo richiesto.
+dell'aria, della luminosita' in lux e, per i vasi configurati, umidita' minima,
+massima, media e ultima lettura nel periodo richiesto. La luminosita' viene
+mostrata solo quando il payload del BH1750 e' valido; durata e andamento
+giornaliero sono ancora da implementare.
 
 Il riepilogo non invia ancora notifiche e non formula consigli di irrigazione:
-alert, recap schedulato, luce BH1750 e registrazione delle irrigazioni sono
-funzioni delle fasi successive o richiedono hardware non ancora implementato.
+alert, recap schedulato, andamento giornaliero della luce e registrazione delle
+irrigazioni sono funzioni delle fasi successive.
+
+## TODO bot Telegram: configurazione guidata
+
+La gestione attuale dei comandi `/node` e `/plant` accetta argomenti testuali
+liberi. Questo consente errori pericolosi, ad esempio creare il nodo tecnico
+`Balcone` scrivendo un nome leggibile al posto di `plant-node-01`. La
+configurazione guidata è disponibile dal menu, con tastiere inline e stato
+temporaneo separato per utente. I comandi testuali restano disponibili per
+compatibilità, ma applicano le stesse validazioni.
+
+### Milestone 1: integrita' dei dati
+
+- [x] Distinguere sempre ID tecnico MQTT e nome leggibile; il nome non deve
+	mai essere usato come ID del nodo.
+- [x] Costruire l'elenco dei nodi dai messaggi MQTT ricevuti, mostrando ID e
+	nome attuale quando disponibile.
+- [x] Rifiutare `/node` se l'ID non e' tra i nodi conosciuti, spiegando come
+	accendere il nodo e attendere il primo messaggio MQTT.
+- [x] Rifiutare `/plant` se il nodo non e' conosciuto.
+- [x] Verificare che il canale sia disponibile e non gia' assegnato a un'altra
+	pianta, salvo esplicita modifica.
+- [x] Validare nomi vuoti, duplicati, lunghezze massime e caratteri non
+	gestibili prima di scrivere nel database.
+- [x] Aggiungere test per nodo inesistente, canale occupato e nomi duplicati.
+
+### Milestone 2: wizard per i nodi
+
+- [x] Aggiungere dal menu il pulsante `Imposta nome nodo`.
+- [x] Mostrare una tastiera con i nodi disponibili, indicando ID tecnico,
+	nome attuale e stato online/offline.
+- [x] Chiedere il nuovo nome in un messaggio separato, con `/annulla` sempre
+	disponibile.
+- [x] Mostrare un riepilogo e chiedere conferma prima di salvare.
+- [x] Gestire timeout, `/annulla`, `/start` e nuovi comandi durante il wizard.
+
+### Milestone 3: wizard per piante e canali
+
+- [x] Aggiungere dal menu il pulsante `Aggiungi pianta`.
+- [x] Far scegliere prima il nodo da una tastiera, poi il canale libero da
+	`A0` a `A3`, senza chiedere all'utente l'ID a mano.
+- [x] Chiedere in sequenza nome pianta, specie, posizione e note opzionali.
+- [x] Consentire di saltare i campi opzionali e correggere l'ultimo campo.
+- [x] Mostrare il riepilogo completo e richiedere conferma finale.
+- [ ] Riutilizzare lo stesso flusso per modificare o riassegnare una pianta.
+
+### Milestone 4: interfaccia conversazionale coerente
+
+- [x] Sostituire il menu iniziale con azioni operative: `Aggiungi pianta`,
+	`Configura nodo`, `Le mie piante`, `Stato nodi` e `Aiuto`.
+- [x] Usare callback con identificativi opachi e verificare sempre l'utente
+	autorizzato prima di eseguire un'azione.
+- [x] Separare handler, stato delle conversazioni e rendering delle tastiere
+	in moduli testabili.
+- [x] Limitare ogni transizione alle opzioni valide nello stato corrente.
+- [ ] Aggiungere test degli handler e del percorso completo con messaggi e
+	callback simulati.
+
+### Milestone 5: operazioni distruttive e manutenzione
+
+- [ ] Aggiungere rimozione guidata di pianta e nodo con conferma esplicita.
+- [ ] Separare cancellazione della configurazione, ultimo stato e storico;
+	proporre una scelta chiara invece di eliminare tutto implicitamente.
+- [ ] Mostrare sempre l'ID tecnico coinvolto prima di un'operazione distruttiva.
+- [ ] Registrare nei log chi ha eseguito la modifica e su quale entita'.
 
 ## Avvio automatico
 

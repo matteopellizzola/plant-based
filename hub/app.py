@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,10 @@ from typing import Any
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application, CallbackQueryHandler, CommandHandler, ContextTypes,
+    ConversationHandler, MessageHandler, filters,
+)
 
 from core import Settings, Store, topic_parts
 
@@ -42,10 +46,264 @@ Per recuperare il tuo ID Telegram: /whoami"""
 def main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton("➕ Aggiungi pianta", callback_data="wizard:plant:start")],
+            [InlineKeyboardButton("⚙️ Configura nodo", callback_data="wizard:node:start")],
             [InlineKeyboardButton("🌱 Le mie piante", callback_data="menu:plants")],
             [InlineKeyboardButton("📊 Stato nodi", callback_data="menu:status")],
             [InlineKeyboardButton("❓ Aiuto", callback_data="menu:help")],
         ]
+    )
+
+
+NODE_NAME, PLANT_NODE, PLANT_CHANNEL, PLANT_NAME, PLANT_SPECIES, PLANT_POSITION, PLANT_NOTES, PLANT_CONFIRM = range(8)
+
+
+def wizard_token(context: ContextTypes.DEFAULT_TYPE, value: str) -> str:
+    token = uuid.uuid4().hex[:12]
+    context.user_data.setdefault("wizard_callbacks", {})[token] = value
+    return token
+
+
+def wizard_value(context: ContextTypes.DEFAULT_TYPE, token: str) -> str | None:
+    return context.user_data.get("wizard_callbacks", {}).get(token)
+
+
+def cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]])
+
+
+async def cancel_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("wizard", None)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("Operazione annullata.", reply_markup=main_keyboard())
+    elif update.effective_message:
+        await update.effective_message.reply_text("Operazione annullata.", reply_markup=main_keyboard())
+    return ConversationHandler.END
+
+
+async def node_wizard_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not user_allowed(update, context.application.bot_data["settings"]):
+        await query.answer("Accesso non autorizzato.", show_alert=True)
+        return ConversationHandler.END
+    await query.answer()
+    store: Store = context.application.bot_data["store"]
+    nodes = store.known_nodes()
+    if not nodes:
+        await query.edit_message_text("Nessun nodo conosciuto. Accendi un nodo e attendi il primo messaggio MQTT.")
+        return ConversationHandler.END
+    buttons = []
+    for node, name, _ in nodes:
+        label = f"{node} · {name or 'senza nome'} · {store.node_status(node)}"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"wizard:node:select:{wizard_token(context, node)}")])
+    buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
+    await query.edit_message_text("Scegli il nodo da configurare:", reply_markup=InlineKeyboardMarkup(buttons))
+    return NODE_NAME
+
+
+async def node_wizard_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    token = query.data.rsplit(":", 1)[-1]
+    node = wizard_value(context, token)
+    store: Store = context.application.bot_data["store"]
+    if not node or not any(item[0] == node for item in store.known_nodes()):
+        await query.answer("Nodo non più disponibile.", show_alert=True)
+        return ConversationHandler.END
+    context.user_data["wizard"] = {"type": "node", "node": node}
+    await query.answer()
+    await query.edit_message_text(f"Nuovo nome per {node}:\nInvia il nome oppure /annulla.", reply_markup=cancel_keyboard())
+    return NODE_NAME
+
+
+async def node_wizard_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    wizard = context.user_data.get("wizard", {})
+    store: Store = context.application.bot_data["store"]
+    node = wizard.get("node")
+    name = update.effective_message.text.strip()
+    try:
+        Store.validate_text(name, "nome nodo", 64)
+    except ValueError as error:
+        await update.effective_message.reply_text(str(error), reply_markup=cancel_keyboard())
+        return NODE_NAME
+    wizard["name"] = name
+    await update.effective_message.reply_text(
+        f"Confermi?\nNodo tecnico: {node}\nNuovo nome: {name}",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Conferma", callback_data="wizard:node:confirm"), InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]),
+    )
+    return NODE_NAME
+
+
+async def node_wizard_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    wizard = context.user_data.get("wizard", {})
+    store: Store = context.application.bot_data["store"]
+    try:
+        store.set_node(wizard["node"], wizard["name"])
+    except (KeyError, ValueError) as error:
+        await query.answer(str(error), show_alert=True)
+        return ConversationHandler.END
+    await query.answer()
+    await query.edit_message_text(f"Nome salvato: {wizard['node']} = {wizard['name']}", reply_markup=main_keyboard())
+    context.user_data.pop("wizard", None)
+    return ConversationHandler.END
+
+
+async def plant_wizard_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not user_allowed(update, context.application.bot_data["settings"]):
+        await query.answer("Accesso non autorizzato.", show_alert=True)
+        return ConversationHandler.END
+    await query.answer()
+    store: Store = context.application.bot_data["store"]
+    nodes = store.known_nodes()
+    if not nodes:
+        await query.edit_message_text("Nessun nodo conosciuto. Accendi un nodo e attendi il primo messaggio MQTT.")
+        return ConversationHandler.END
+    buttons = [[InlineKeyboardButton(f"{node} · {name or 'senza nome'} · {store.node_status(node)}", callback_data=f"wizard:plant:node:{wizard_token(context, node)}")] for node, name, _ in nodes]
+    buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
+    await query.edit_message_text("Scegli il nodo della pianta:", reply_markup=InlineKeyboardMarkup(buttons))
+    return PLANT_NODE
+
+
+async def plant_wizard_node(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    node = wizard_value(context, query.data.rsplit(":", 1)[-1])
+    store: Store = context.application.bot_data["store"]
+    if not node or not any(item[0] == node for item in store.known_nodes()):
+        await query.answer("Nodo non più disponibile.", show_alert=True)
+        return ConversationHandler.END
+    context.user_data["wizard"] = {"type": "plant", "node": node}
+    context.user_data["wizard_state"] = PLANT_NAME
+    buttons = []
+    for channel in range(4):
+        plant = store.channel_plant(node, channel)
+        if plant is None:
+            buttons.append([InlineKeyboardButton(f"A{channel} · libero", callback_data=f"wizard:plant:channel:{channel}")])
+    buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
+    await query.answer()
+    await query.edit_message_text("Scegli un canale libero:", reply_markup=InlineKeyboardMarkup(buttons))
+    return PLANT_CHANNEL
+
+
+async def plant_wizard_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    channel = int(query.data.rsplit(":", 1)[-1])
+    node = context.user_data.get("wizard", {}).get("node")
+    store: Store = context.application.bot_data["store"]
+    if node is None or channel not in range(4) or store.channel_plant(node, channel):
+        await query.answer("Canale non disponibile.", show_alert=True)
+        return PLANT_CHANNEL
+    context.user_data["wizard"]["channel"] = channel
+    await query.answer()
+    await query.edit_message_text("Nome della pianta (oppure /annulla):", reply_markup=cancel_keyboard())
+    return PLANT_NAME
+
+
+async def plant_wizard_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    wizard = context.user_data.get("wizard", {})
+    state = context.user_data.get("wizard_state", PLANT_NAME)
+    text = update.effective_message.text.strip()
+    prompts = {PLANT_NAME: ("name", "Specie (opzionale):"), PLANT_SPECIES: ("species", "Posizione (opzionale):"), PLANT_POSITION: ("position", "Note (opzionali):"), PLANT_NOTES: ("notes", None)}
+    field, next_prompt = prompts[state]
+    if state == PLANT_NAME:
+        try:
+            Store.validate_text(text, "nome pianta", 64)
+        except ValueError as error:
+            await update.effective_message.reply_text(str(error), reply_markup=cancel_keyboard())
+            return PLANT_NAME
+    elif len(text) > 160:
+        await update.effective_message.reply_text("Testo troppo lungo (massimo 160 caratteri).", reply_markup=cancel_keyboard())
+        return state
+    wizard[field] = text
+    if next_prompt is None:
+        await update.effective_message.reply_text(
+            f"Confermi?\nNodo: {wizard['node']}\nCanale: A{wizard['channel']}\nPianta: {wizard['name']}\nSpecie: {wizard.get('species') or '-'}\nPosizione: {wizard.get('position') or '-'}\nNote: {wizard.get('notes') or '-'}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Conferma", callback_data="wizard:plant:confirm"), InlineKeyboardButton("Correggi note", callback_data="wizard:plant:edit-notes")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]),
+        )
+        return PLANT_CONFIRM
+    context.user_data["wizard_state"] = state + 1
+    keyboard = [[InlineKeyboardButton("Salta", callback_data="wizard:skip")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]] if state in {PLANT_SPECIES, PLANT_POSITION, PLANT_NOTES} else cancel_keyboard().inline_keyboard
+    await update.effective_message.reply_text(next_prompt, reply_markup=InlineKeyboardMarkup(keyboard))
+    return state + 1
+
+
+async def plant_wizard_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    state = context.user_data.get("wizard_state", PLANT_SPECIES)
+    wizard = context.user_data.get("wizard", {})
+    prompts = {PLANT_SPECIES: ("species", "Posizione (opzionale):"), PLANT_POSITION: ("position", "Note (opzionali):"), PLANT_NOTES: ("notes", None)}
+    field, next_prompt = prompts[state]
+    wizard[field] = ""
+    await query.answer()
+    if next_prompt is None:
+        await query.edit_message_text("Inserisci le note opzionali oppure conferma direttamente.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Conferma", callback_data="wizard:plant:confirm")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]))
+        return PLANT_CONFIRM
+    context.user_data["wizard_state"] = state + 1
+    await query.edit_message_text(next_prompt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Salta", callback_data="wizard:skip")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]))
+    return state + 1
+
+
+async def plant_wizard_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    wizard = context.user_data.get("wizard", {})
+    store: Store = context.application.bot_data["store"]
+    try:
+        store.set_plant(wizard["node"], wizard["channel"], wizard["name"], wizard.get("species", ""), wizard.get("position", ""), wizard.get("notes", ""))
+    except (KeyError, ValueError) as error:
+        await query.answer(str(error), show_alert=True)
+        return ConversationHandler.END
+    await query.answer()
+    await query.edit_message_text(f"Vaso salvato: {wizard['name']} ({wizard['node']}, A{wizard['channel']})", reply_markup=main_keyboard())
+    context.user_data.pop("wizard", None)
+    context.user_data.pop("wizard_state", None)
+    return ConversationHandler.END
+
+
+async def plant_wizard_edit_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    context.user_data["wizard_state"] = PLANT_NOTES
+    await query.answer()
+    await query.edit_message_text(
+        "Nuove note (oppure premi Salta):",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Salta", callback_data="wizard:skip")],
+            [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+        ]),
+    )
+    return PLANT_NOTES
+
+
+def build_wizard_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(node_wizard_start, pattern=r"^wizard:node:start$"),
+            CallbackQueryHandler(plant_wizard_start, pattern=r"^wizard:plant:start$"),
+        ],
+        states={
+            NODE_NAME: [
+                CallbackQueryHandler(node_wizard_select, pattern=r"^wizard:node:select:"),
+                CallbackQueryHandler(node_wizard_confirm, pattern=r"^wizard:node:confirm$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, node_wizard_name),
+            ],
+            PLANT_NODE: [CallbackQueryHandler(plant_wizard_node, pattern=r"^wizard:plant:node:")],
+            PLANT_CHANNEL: [CallbackQueryHandler(plant_wizard_channel, pattern=r"^wizard:plant:channel:")],
+            PLANT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, plant_wizard_text)],
+            PLANT_SPECIES: [CallbackQueryHandler(plant_wizard_skip, pattern=r"^wizard:skip$"), MessageHandler(filters.TEXT & ~filters.COMMAND, plant_wizard_text)],
+            PLANT_POSITION: [CallbackQueryHandler(plant_wizard_skip, pattern=r"^wizard:skip$"), MessageHandler(filters.TEXT & ~filters.COMMAND, plant_wizard_text)],
+            PLANT_NOTES: [CallbackQueryHandler(plant_wizard_skip, pattern=r"^wizard:skip$"), MessageHandler(filters.TEXT & ~filters.COMMAND, plant_wizard_text)],
+            PLANT_CONFIRM: [
+                CallbackQueryHandler(plant_wizard_confirm, pattern=r"^wizard:plant:confirm$"),
+                CallbackQueryHandler(plant_wizard_edit_notes, pattern=r"^wizard:plant:edit-notes$"),
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_wizard, pattern=r"^wizard:cancel$"),
+            CommandHandler(["annulla", "cancel", "start", "help", "piante", "stato", "status", "storico", "cal", "calibra", "node", "plant"], cancel_wizard),
+        ],
+        conversation_timeout=900,
+        per_user=True,
+        per_chat=True,
     )
 
 
@@ -260,6 +518,9 @@ async def plant_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     lines.append(f"Umidità terreno: {soil_value:.1f}%" if isinstance(soil_value, (int, float)) else "Umidità terreno: dato non disponibile")
     if isinstance(air, dict) and air.get("valid"):
         lines.append(f"Aria: {air.get('temperature_c', '?')} °C · {air.get('humidity_percent', '?')}% umidità")
+    light = payload.get("light", {})
+    if isinstance(light, dict) and light.get("valid") and isinstance(light.get("lux"), (int, float)):
+        lines.append(f"Luce: {light['lux']:.1f} lux")
     if threshold is not None:
         lines.append(f"Soglia configurata: {threshold:.0f}%")
     await update.effective_message.reply_text("\n".join(lines))
@@ -291,7 +552,11 @@ async def set_node_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     node = context.args[0]
     name = " ".join(context.args[1:]).strip()
     store: Store = context.application.bot_data["store"]
-    store.set_node(node, name)
+    try:
+        store.set_node(node, name)
+    except ValueError as error:
+        await update.effective_message.reply_text(str(error))
+        return
     await update.effective_message.reply_text(f"Nome salvato: {node} = {name}")
 
 
@@ -310,7 +575,11 @@ async def set_plant(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     position = values[2] if len(values) > 2 else ""
     notes = " ".join(values[3:])
     store: Store = context.application.bot_data["store"]
-    store.set_plant(node, int(channel), name, species, position, notes)
+    try:
+        store.set_plant(node, int(channel), name, species, position, notes)
+    except ValueError as error:
+        await update.effective_message.reply_text(str(error))
+        return
     await update.effective_message.reply_text(f"Vaso salvato: {name} ({node}, A{channel})")
 
 
@@ -327,16 +596,29 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     period = context.args[1] if len(context.args) > 1 else "24h"
     since = datetime.now(timezone.utc) - timedelta(hours=24 if period == "24h" else 24 * 7)
     summary = store.air_summary(node, since.isoformat(timespec="seconds"))
-    if not summary["count"]:
-        await update.effective_message.reply_text(f"Nessun dato aria per {store.node_name(node)} nel periodo {period}.")
+    light = store.light_summary(node, since.isoformat(timespec="seconds"))
+    if not summary["count"] and not light["count"]:
+        await update.effective_message.reply_text(f"Nessun dato valido per {store.node_name(node)} nel periodo {period}.")
         return
-    await update.effective_message.reply_text(
-        f"{store.node_name(node)} [{node}] - {period}\n"
-        f"Temperatura C: min {summary['minimum']:.1f}, max {summary['maximum']:.1f}, "
-        f"media {summary['average']:.1f}, ultima {summary['latest']:.1f}\n"
-        f"Umidita aria media: {summary['humidity_average']:.1f}%\n"
-        f"Letture valide: {summary['count']}"
-    )
+    lines = [f"{store.node_name(node)} [{node}] - {period}"]
+    if summary["count"]:
+        lines.extend([
+            f"Temperatura C: min {summary['minimum']:.1f}, max {summary['maximum']:.1f}, "
+            f"media {summary['average']:.1f}, ultima {summary['latest']:.1f}",
+            f"Umidita aria media: {summary['humidity_average']:.1f}%",
+            f"Letture aria valide: {summary['count']}",
+        ])
+    else:
+        lines.append("Aria: nessun dato valido")
+    if light["count"]:
+        lines.extend([
+            f"Luce: min {light['minimum']:.1f}, max {light['maximum']:.1f}, "
+            f"media {light['average']:.1f}, ultima {light['latest']:.1f} lux",
+            f"Letture luce valide: {light['count']}",
+        ])
+    else:
+        lines.append("Luce: nessun dato valido")
+    await update.effective_message.reply_text("\n".join(lines))
     soil_lines = []
     for plant_node, channel, name, *_ in store.plants():
         if plant_node != node:
@@ -419,10 +701,10 @@ def main() -> None:
     mqtt_client.loop_start()
     application = Application.builder().token(settings.telegram_token).post_init(configure_command_menu).build()
     application.bot_data.update(settings=settings, store=store, mqtt=mqtt_client)
+    application.add_handler(build_wizard_handler())
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CallbackQueryHandler(button_click))
     application.add_handler(CommandHandler(["status", "stato"], status))
     application.add_handler(CommandHandler("piante", plants))
     application.add_handler(CommandHandler("pianta", plant_detail))
@@ -431,6 +713,7 @@ def main() -> None:
     application.add_handler(CommandHandler("node", set_node_name))
     application.add_handler(CommandHandler("plant", set_plant))
     application.add_handler(CommandHandler("storico", history))
+    application.add_handler(CallbackQueryHandler(button_click))
     LOGGER.info("Hub avviato; utenti autorizzati: %d", len(settings.allowed_user_ids))
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
