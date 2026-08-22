@@ -56,11 +56,46 @@ restare vincolati agli utenti esplicitamente autorizzati.
 Comandi disponibili agli utenti autorizzati:
 
 ```text
+/start
+/help
+/piante
+/pianta Basilico
+/rinomina Basilico | Basilico cucina
+/stato
+/storico Basilico 24h
 /status
 /cal plant-node-01 0 dry 2.700
 /cal plant-node-01 0 wet 1.250
 /cal plant-node-01 0 threshold 35
+/node plant-node-01 Balcone nord
+/plant plant-node-01 0 Basilico Ocimum cucina vaso_piccolo
+/storico plant-node-01 24h
+/storico plant-node-01 7g
 ```
+
+I comandi in italiano sono pensati per l'uso quotidiano: `/stato` è l'alias
+di `/status`, `/calibra` è l'alias di `/cal`, e `/storico` accetta il nome
+della pianta quando è composto da una sola parola (`/storico Basilico 24h`),
+oltre all'ID tecnico del nodo. `/start`
+e `/help` mostrano solo le funzioni già disponibili; non vengono ancora
+pubblicizzati irrigazione, problemi o notifiche automatiche.
+
+`/piante` mostra l'alberatura completa raggruppando ogni vaso sotto il proprio
+nodo. Per cambiare il nome di una pianta usa il separatore `|`, che permette di
+conservare gli spazi nel nome: `/rinomina Basilico | Basilico cucina`. Il nome
+nuovo deve essere unico; gli altri dati della pianta restano invariati.
+
+`/node` salva il nome leggibile del nodo senza modificare l'ID MQTT. `/plant`
+salva nome, specie, posizione e note del canale; per mantenere semplici gli
+argomenti, usa una parola singola per nome, specie e posizione e lascia le note
+come testo finale. Le misure vengono conservate nello storico SQLite oltre alla
+cache dell'ultimo messaggio. `/storico` mostra le statistiche della temperatura
+dell'aria e, per i vasi configurati, umidita' minima, massima, media e ultima
+lettura nel periodo richiesto.
+
+Il riepilogo non invia ancora notifiche e non formula consigli di irrigazione:
+alert, recap schedulato, luce BH1750 e registrazione delle irrigazioni sono
+funzioni delle fasi successive o richiedono hardware non ancora implementato.
 
 ## Avvio automatico
 
