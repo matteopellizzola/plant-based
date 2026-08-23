@@ -177,11 +177,10 @@ compatibilità, ma applicano le stesse validazioni.
 
 ### Milestone 4b: configurazione e consultazione a pulsanti
 
-- [ ] Aggiungere `Calibra sensore` al menu o al dettaglio del nodo.
-- [ ] Far scegliere nodo, canale `A0`-`A3` e parametro `dry`, `wet` o soglia da
+- [x] Aggiungere `Calibra sensore` al menu principale inline.
+- [x] Far scegliere nodo, canale `A0`-`A3` e parametro `dry`, `wet` o soglia da
 	tastiere inline; chiedere soltanto il valore numerico.
-- [ ] Mostrare la calibrazione corrente e chiedere conferma prima dell'invio
-	MQTT.
+- [x] Chiedere conferma prima dell'invio MQTT della calibrazione.
 - [ ] Aggiungere `Stato nodi` dettagliato, con un pulsante per ogni nodo e ID
 	tecnico sempre visibile.
 - [ ] Aggiungere pulsanti per temperatura, umidità, luce e storico del nodo.
