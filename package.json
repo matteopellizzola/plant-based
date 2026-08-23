@@ -1,0 +1,7 @@
+{
+  "name": "plant-based",
+  "private": true,
+  "scripts": {
+    "deploy-ssh": "node scripts/deploy-ssh.js"
+  }
+}

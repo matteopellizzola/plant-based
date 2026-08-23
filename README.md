@@ -45,6 +45,22 @@ nodi.
 
 ## Preparazione
 
+### Deploy del servizio hub
+
+Dal Mac, installa una volta `sshpass` e lancia il deploy passando la password
+dell'utente `pellipi`:
+
+```bash
+brew install hudochenkov/sshpass/sshpass
+npm run deploy-ssh -- myPwd
+```
+
+Lo script si connette a `pellipi@192.168.1.10`, aggiorna `plant-based`, installa
+le dipendenze Python e riavvia `plant-hub`, mostrando infine lo stato del
+servizio. La password non viene salvata nei file del progetto, ma passando il
+valore direttamente al comando può essere registrata nella cronologia della
+shell.
+
 Il progetto usa [PlatformIO](https://platformio.org/) con framework Arduino.
 
 1. Installa Visual Studio Code e l'estensione PlatformIO IDE, oppure la CLI di

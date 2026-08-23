@@ -99,14 +99,22 @@ Il riepilogo non invia ancora notifiche e non formula consigli di irrigazione:
 alert, recap schedulato, andamento giornaliero della luce e registrazione delle
 irrigazioni sono funzioni delle fasi successive.
 
-## TODO bot Telegram: configurazione guidata
+## TODO bot Telegram: configurazione guidata e interfaccia a pulsanti
 
-La gestione attuale dei comandi `/node` e `/plant` accetta argomenti testuali
-liberi. Questo consente errori pericolosi, ad esempio creare il nodo tecnico
-`Balcone` scrivendo un nome leggibile al posto di `plant-node-01`. La
-configurazione guidata è disponibile dal menu, con tastiere inline e stato
+La configurazione guidata è disponibile dal menu, con tastiere inline e stato
 temporaneo separato per utente. I comandi testuali restano disponibili per
 compatibilità, ma applicano le stesse validazioni.
+
+### Stato attuale dei pulsanti
+
+- [x] Menu principale con `Aggiungi pianta`, `Configura nodo`, `Le mie piante`,
+	`Stato nodi` e `Aiuto`.
+- [x] Scelta del nodo e del canale nel wizard di aggiunta pianta.
+- [x] Conferma e annullamento delle configurazioni guidate.
+- [ ] Pulsante di ritorno al menu in ogni schermata e gestione coerente del
+	pulsante `Annulla`.
+- [ ] Nessuna funzione deve richiedere di digitare un ID tecnico quando può
+	essere scelto da una tastiera.
 
 ### Milestone 1: integrita' dei dati
 
@@ -143,17 +151,48 @@ compatibilità, ma applicano le stesse validazioni.
 - [x] Mostrare il riepilogo completo e richiedere conferma finale.
 - [ ] Riutilizzare lo stesso flusso per modificare o riassegnare una pianta.
 
+### Milestone 3b: azioni sulle piante
+
+- [ ] Aggiungere un pulsante `Rinomina` nel dettaglio della pianta.
+- [ ] Chiedere il nuovo nome in un messaggio separato e mostrare il riepilogo
+	prima del salvataggio.
+- [ ] Aggiungere pulsanti `Modifica` e `Sposta canale` riutilizzando il wizard,
+	con scelta del nodo e dei soli canali liberi.
+- [ ] Mostrare nel dettaglio tutti i dati configurati: specie, posizione, note,
+	soglia e ultima lettura.
+- [ ] Aggiungere pulsanti per lo storico `24h` e `7g` dalla pianta o dal nodo.
+- [ ] Aggiungere test per rinomina, modifica, riassegnazione e conflitti.
+
 ### Milestone 4: interfaccia conversazionale coerente
 
 - [x] Sostituire il menu iniziale con azioni operative: `Aggiungi pianta`,
 	`Configura nodo`, `Le mie piante`, `Stato nodi` e `Aiuto`.
 - [x] Usare callback con identificativi opachi e verificare sempre l'utente
 	autorizzato prima di eseguire un'azione.
-- [x] Separare handler, stato delle conversazioni e rendering delle tastiere
+- [ ] Separare handler, stato delle conversazioni e rendering delle tastiere
 	in moduli testabili.
 - [x] Limitare ogni transizione alle opzioni valide nello stato corrente.
 - [ ] Aggiungere test degli handler e del percorso completo con messaggi e
 	callback simulati.
+
+### Milestone 4b: configurazione e consultazione a pulsanti
+
+- [ ] Aggiungere `Calibra sensore` al menu o al dettaglio del nodo.
+- [ ] Far scegliere nodo, canale `A0`-`A3` e parametro `dry`, `wet` o soglia da
+	tastiere inline; chiedere soltanto il valore numerico.
+- [ ] Mostrare la calibrazione corrente e chiedere conferma prima dell'invio
+	MQTT.
+- [ ] Aggiungere `Stato nodi` dettagliato, con un pulsante per ogni nodo e ID
+	tecnico sempre visibile.
+- [ ] Aggiungere pulsanti per temperatura, umidità, luce e storico del nodo.
+- [ ] Rendere navigabili da pulsanti tutte le piante dell'alberatura, senza
+	dipendere dal comando `/pianta`.
+- [ ] Aggiungere navigazione uniforme `Indietro`, `Menu` e `Annulla` a ogni
+	schermata.
+- [ ] Gestire callback scadute, nodi scomparsi e dati non più disponibili senza
+	errori visibili all'utente.
+- [ ] Aggiungere test di autorizzazione per ogni callback e test end-to-end dei
+	percorsi principali.
 
 ### Milestone 5: operazioni distruttive e manutenzione
 
@@ -162,6 +201,16 @@ compatibilità, ma applicano le stesse validazioni.
 	proporre una scelta chiara invece di eliminare tutto implicitamente.
 - [ ] Mostrare sempre l'ID tecnico coinvolto prima di un'operazione distruttiva.
 - [ ] Registrare nei log chi ha eseguito la modifica e su quale entita'.
+
+### Milestone 6: funzioni future
+
+- [ ] Aggiungere alert per umidità sotto soglia e nodi offline.
+- [ ] Aggiungere recap schedulato configurabile da pulsanti.
+- [ ] Aggiungere andamento giornaliero di temperatura, umidità e luminosità.
+- [ ] Aggiungere registrazione e storico delle irrigazioni quando sarà
+	disponibile l'hardware.
+- [ ] Aggiungere consigli di irrigazione soltanto dopo una validazione sui dati
+	raccolti.
 
 ## Avvio automatico
 

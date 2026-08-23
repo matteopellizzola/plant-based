@@ -76,7 +76,7 @@ async def cancel_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     context.user_data.pop("wizard", None)
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text("Operazione annullata.", reply_markup=main_keyboard())
+        await update.callback_query.message.reply_text("Operazione annullata.", reply_markup=main_keyboard())
     elif update.effective_message:
         await update.effective_message.reply_text("Operazione annullata.", reply_markup=main_keyboard())
     return ConversationHandler.END
@@ -91,14 +91,14 @@ async def node_wizard_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     store: Store = context.application.bot_data["store"]
     nodes = store.known_nodes()
     if not nodes:
-        await query.edit_message_text("Nessun nodo conosciuto. Accendi un nodo e attendi il primo messaggio MQTT.")
+        await query.message.reply_text("Nessun nodo conosciuto. Accendi un nodo e attendi il primo messaggio MQTT.")
         return ConversationHandler.END
     buttons = []
     for node, name, _ in nodes:
         label = f"{node} · {name or 'senza nome'} · {store.node_status(node)}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"wizard:node:select:{wizard_token(context, node)}")])
     buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
-    await query.edit_message_text("Scegli il nodo da configurare:", reply_markup=InlineKeyboardMarkup(buttons))
+    await query.message.reply_text("Scegli il nodo da configurare:", reply_markup=InlineKeyboardMarkup(buttons))
     return NODE_NAME
 
 
@@ -112,7 +112,7 @@ async def node_wizard_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
     context.user_data["wizard"] = {"type": "node", "node": node}
     await query.answer()
-    await query.edit_message_text(f"Nuovo nome per {node}:\nInvia il nome oppure /annulla.", reply_markup=cancel_keyboard())
+    await query.message.reply_text(f"Nuovo nome per {node}:\nInvia il nome oppure /annulla.", reply_markup=cancel_keyboard())
     return NODE_NAME
 
 
@@ -144,7 +144,7 @@ async def node_wizard_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer(str(error), show_alert=True)
         return ConversationHandler.END
     await query.answer()
-    await query.edit_message_text(f"Nome salvato: {wizard['node']} = {wizard['name']}", reply_markup=main_keyboard())
+    await query.message.reply_text(f"Nome salvato: {wizard['node']} = {wizard['name']}", reply_markup=main_keyboard())
     context.user_data.pop("wizard", None)
     return ConversationHandler.END
 
@@ -158,11 +158,11 @@ async def plant_wizard_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     store: Store = context.application.bot_data["store"]
     nodes = store.known_nodes()
     if not nodes:
-        await query.edit_message_text("Nessun nodo conosciuto. Accendi un nodo e attendi il primo messaggio MQTT.")
+        await query.message.reply_text("Nessun nodo conosciuto. Accendi un nodo e attendi il primo messaggio MQTT.")
         return ConversationHandler.END
     buttons = [[InlineKeyboardButton(f"{node} · {name or 'senza nome'} · {store.node_status(node)}", callback_data=f"wizard:plant:node:{wizard_token(context, node)}")] for node, name, _ in nodes]
     buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
-    await query.edit_message_text("Scegli il nodo della pianta:", reply_markup=InlineKeyboardMarkup(buttons))
+    await query.message.reply_text("Scegli il nodo della pianta:", reply_markup=InlineKeyboardMarkup(buttons))
     return PLANT_NODE
 
 
@@ -182,7 +182,7 @@ async def plant_wizard_node(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             buttons.append([InlineKeyboardButton(f"A{channel} · libero", callback_data=f"wizard:plant:channel:{channel}")])
     buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
     await query.answer()
-    await query.edit_message_text("Scegli un canale libero:", reply_markup=InlineKeyboardMarkup(buttons))
+    await query.message.reply_text("Scegli un canale libero:", reply_markup=InlineKeyboardMarkup(buttons))
     return PLANT_CHANNEL
 
 
@@ -196,7 +196,7 @@ async def plant_wizard_channel(update: Update, context: ContextTypes.DEFAULT_TYP
         return PLANT_CHANNEL
     context.user_data["wizard"]["channel"] = channel
     await query.answer()
-    await query.edit_message_text("Nome della pianta (oppure /annulla):", reply_markup=cancel_keyboard())
+    await query.message.reply_text("Nome della pianta (oppure /annulla):", reply_markup=cancel_keyboard())
     return PLANT_NAME
 
 
@@ -237,10 +237,10 @@ async def plant_wizard_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     wizard[field] = ""
     await query.answer()
     if next_prompt is None:
-        await query.edit_message_text("Inserisci le note opzionali oppure conferma direttamente.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Conferma", callback_data="wizard:plant:confirm")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]))
+        await query.message.reply_text("Inserisci le note opzionali oppure conferma direttamente.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Conferma", callback_data="wizard:plant:confirm")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]))
         return PLANT_CONFIRM
     context.user_data["wizard_state"] = state + 1
-    await query.edit_message_text(next_prompt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Salta", callback_data="wizard:skip")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]))
+    await query.message.reply_text(next_prompt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Salta", callback_data="wizard:skip")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]))
     return state + 1
 
 
@@ -254,7 +254,7 @@ async def plant_wizard_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.answer(str(error), show_alert=True)
         return ConversationHandler.END
     await query.answer()
-    await query.edit_message_text(f"Vaso salvato: {wizard['name']} ({wizard['node']}, A{wizard['channel']})", reply_markup=main_keyboard())
+    await query.message.reply_text(f"Vaso salvato: {wizard['name']} ({wizard['node']}, A{wizard['channel']})", reply_markup=main_keyboard())
     context.user_data.pop("wizard", None)
     context.user_data.pop("wizard_state", None)
     return ConversationHandler.END
@@ -264,7 +264,7 @@ async def plant_wizard_edit_notes(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     context.user_data["wizard_state"] = PLANT_NOTES
     await query.answer()
-    await query.edit_message_text(
+    await query.message.reply_text(
         "Nuove note (oppure premi Salta):",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Salta", callback_data="wizard:skip")],
@@ -361,14 +361,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if query.data == "menu:plants":
         configured_plants = store.plants()
         if not configured_plants:
-            await query.edit_message_text("Non hai ancora configurato nessuna pianta.")
+            await query.message.reply_text("Non hai ancora configurato nessuna pianta.")
             return
         keyboard = [
             [InlineKeyboardButton(name, callback_data=f"plant:{node}:{channel}")]
             for node, channel, name, *_ in configured_plants
         ]
         keyboard.append([InlineKeyboardButton("⬅️ Menu", callback_data="menu:home")])
-        await query.edit_message_text("Scegli una pianta:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.message.reply_text("Scegli una pianta:", reply_markup=InlineKeyboardMarkup(keyboard))
         return
     if query.data == "menu:status":
         rows = store.latest()
@@ -377,19 +377,19 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             for node, kind, payload, received_at in rows
             if kind == "state"
         )
-        await query.edit_message_text(text or "Nessuno stato ricevuto.", reply_markup=main_keyboard())
+        await query.message.reply_text(text or "Nessuno stato ricevuto.", reply_markup=main_keyboard())
         return
     if query.data == "menu:help":
-        await query.edit_message_text(HELP_TEXT, reply_markup=main_keyboard())
+        await query.message.reply_text(HELP_TEXT, reply_markup=main_keyboard())
         return
     if query.data == "menu:home":
-        await query.edit_message_text("Menu principale", reply_markup=main_keyboard())
+        await query.message.reply_text("Menu principale", reply_markup=main_keyboard())
         return
     if query.data and query.data.startswith("plant:"):
         _, node, channel_text = query.data.split(":", 2)
         matches = [plant for plant in store.plants() if plant[0] == node and str(plant[1]) == channel_text]
         if not matches:
-            await query.edit_message_text("Questa pianta non è più disponibile.", reply_markup=main_keyboard())
+            await query.message.reply_text("Questa pianta non è più disponibile.", reply_markup=main_keyboard())
             return
         _, channel, name, species, position, notes, threshold = matches[0]
         payload = store.latest_measurements(node) or {}
@@ -401,7 +401,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         text = f"🌿 {name}\nNodo: {store.node_name(node)}\nCanale: A{channel}\n"
         text += f"Umidità terreno: {moisture:.1f}%" if isinstance(moisture, (int, float)) else "Umidità terreno: dato non disponibile"
         keyboard = [[InlineKeyboardButton("⬅️ Le mie piante", callback_data="menu:plants")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def configure_command_menu(application: Application) -> None:
