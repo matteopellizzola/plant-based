@@ -47,19 +47,18 @@ nodi.
 
 ### Deploy del servizio hub
 
-Dal Mac, installa una volta `sshpass` e lancia il deploy passando la password
-dell'utente `pellipi`:
+Dal Mac, lancia il deploy passando la password dell'utente `pellipi`:
 
 ```bash
-brew install hudochenkov/sshpass/sshpass
 npm run deploy-ssh -- myPwd
 ```
 
 Lo script si connette a `pellipi@192.168.1.10`, aggiorna `plant-based`, installa
 le dipendenze Python e riavvia `plant-hub`, mostrando infine lo stato del
-servizio. La password non viene salvata nei file del progetto, ma passando il
-valore direttamente al comando può essere registrata nella cronologia della
-shell.
+servizio. Usa `expect`, già incluso in macOS, per gestire i prompt di SSH e
+`sudo`; non sono necessarie installazioni aggiuntive. La password non viene
+salvata nei file del progetto, ma passando il valore direttamente al comando
+può essere registrata nella cronologia della shell.
 
 Il progetto usa [PlatformIO](https://platformio.org/) con framework Arduino.
 
@@ -182,6 +181,46 @@ brew services list
 
 `allow_anonymous true` e' adatto solo al debug nella rete locale: non esporre
 questa configurazione su Internet.
+
+### Avvio del bot Telegram in locale su macOS
+
+Dal terminale, nella directory del progetto, crea l'ambiente Python e installa
+le dipendenze del bot:
+
+```bash
+cd /Users/matteopellizzola/Documents/Arduino/plantBased
+python3 -m venv .venv
+.venv/bin/python -m pip install -r hub/requirements.txt
+cp -n hub/config.example.env hub/.env
+```
+
+Apri `hub/.env` e inserisci almeno il token Telegram e il tuo ID autorizzato:
+
+```dotenv
+MQTT_HOST=127.0.0.1
+MQTT_PORT=1883
+TELEGRAM_BOT_TOKEN=il_token_del_bot
+TELEGRAM_ALLOWED_USER_IDS=123456789
+DATABASE_PATH=hub/data/plant_hub.sqlite3
+```
+
+Per modificare il file puoi usare:
+
+```bash
+nano hub/.env
+```
+
+Con Mosquitto avviato in un altro terminale, avvia il bot dalla directory del
+progetto:
+
+```bash
+.venv/bin/python hub/app.py
+```
+
+Per usare invece il broker sul Raspberry, sostituisci `MQTT_HOST=127.0.0.1`
+con `MQTT_HOST=192.168.1.10`. Il bot resta in esecuzione nel terminale e si
+ferma con `Ctrl+C`. Non avviare contemporaneamente lo stesso bot sul Mac e sul
+Raspberry: entrambi proverebbero a ricevere gli aggiornamenti Telegram.
 
 Le credenziali reali non vengono salvate nel repository perché `secrets.h` è
 presente in `.gitignore`.

@@ -13,30 +13,52 @@ if (password.includes('\n') || password.includes('\r')) {
   process.exit(1);
 }
 
-const remoteScript = `
-set -e
-IFS= read -r sudo_password
-cd plant-based
-git pull
-.venv/bin/pip install -r hub/requirements.txt
-printf '%s\\n' "$sudo_password" | sudo -S -p '' systemctl restart plant-hub
-printf '%s\\n' "$sudo_password" | sudo -S -p '' systemctl status plant-hub --no-pager
+const expectScript = `
+set timeout -1
+set password $env(DEPLOY_PASSWORD)
+
+spawn ssh -T -o StrictHostKeyChecking=accept-new ${host} bash -s
+
+expect {
+  "*yes/no*" {
+    send -- "yes\\r"
+    exp_continue
+  }
+  "*assword:*" {
+    send -- "$password\\r"
+  }
+}
+
+send -- "set -e\\r"
+send -- "cd plant-based\\r"
+send -- "git pull\\r"
+send -- ".venv/bin/pip install -r hub/requirements.txt\\r"
+send -- "sudo -p 'DEPLOY_SUDO_PASSWORD:' systemctl restart plant-hub\\r"
+send -- "sudo -p 'DEPLOY_SUDO_PASSWORD:' systemctl status plant-hub --no-pager\\r"
+
+expect {
+  "DEPLOY_SUDO_PASSWORD:" {
+    send -- "$password\\r"
+    exp_continue
+  }
+  eof
+}
 `;
 
-const ssh = spawn(
-  'sshpass',
-  ['-e', 'ssh', '-T', '-o', 'StrictHostKeyChecking=accept-new', host, 'bash', '-s'],
+const deploy = spawn(
+  '/usr/bin/expect',
+  ['-f', '-'],
   {
-    env: { ...process.env, SSHPASS: password },
+    env: { ...process.env, DEPLOY_PASSWORD: password },
     stdio: ['pipe', 'inherit', 'inherit'],
   },
 );
 
-ssh.stdin.end(`${password}\n${remoteScript}`);
+deploy.stdin.end(expectScript);
 
-ssh.on('error', (error) => {
+deploy.on('error', (error) => {
   if (error.code === 'ENOENT') {
-    console.error('Comando sshpass non trovato. Installa sshpass con: brew install hudochenkov/sshpass/sshpass');
+    console.error('Comando expect non trovato. Su macOS è normalmente disponibile in /usr/bin/expect.');
     process.exitCode = 1;
     return;
   }
@@ -45,7 +67,7 @@ ssh.on('error', (error) => {
   process.exitCode = 1;
 });
 
-ssh.on('close', (code, signal) => {
+deploy.on('close', (code, signal) => {
   if (signal) {
     console.error(`La connessione SSH è terminata dal segnale ${signal}.`);
     process.exitCode = 1;

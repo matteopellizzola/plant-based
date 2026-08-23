@@ -185,7 +185,8 @@ compatibilità, ma applicano le stesse validazioni.
 - [ ] Aggiungere `Stato nodi` dettagliato, con un pulsante per ogni nodo e ID
 	tecnico sempre visibile.
 - [ ] Aggiungere pulsanti per temperatura, umidità, luce e storico del nodo.
-- [ ] Rendere navigabili da pulsanti tutte le piante dell'alberatura, senza
+- [x] Aggiungere pulsanti storico `24h` e `7g` dal dettaglio della pianta.
+- [x] Rendere navigabili da pulsanti tutte le piante dell'alberatura, senza
 	dipendere dal comando `/pianta`.
 - [ ] Aggiungere navigazione uniforme `Indietro`, `Menu` e `Annulla` a ogni
 	schermata.

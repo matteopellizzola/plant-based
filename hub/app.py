@@ -385,6 +385,19 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if query.data == "menu:home":
         await query.message.reply_text("Menu principale", reply_markup=main_keyboard())
         return
+    if query.data and query.data.startswith("history:"):
+        _, token, period = query.data.split(":", 2)
+        target = wizard_value(context, token)
+        if period not in {"24h", "7g"} or not target or ":" not in target:
+            await query.message.reply_text("Questo storico non è più disponibile.", reply_markup=main_keyboard())
+            return
+        node, channel_text = target.rsplit(":", 1)
+        if not any(item[0] == node and str(item[1]) == channel_text for item in store.plants()):
+            await query.message.reply_text("Questa pianta non è più disponibile.", reply_markup=main_keyboard())
+            return
+        text = history_text(store, node, period)
+        await query.message.reply_text(text or f"Nessun dato valido per {store.node_name(node)} nel periodo {period}.")
+        return
     if query.data and query.data.startswith("plant:"):
         _, node, channel_text = query.data.split(":", 2)
         matches = [plant for plant in store.plants() if plant[0] == node and str(plant[1]) == channel_text]
@@ -400,8 +413,54 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         text = f"🌿 {name}\nNodo: {store.node_name(node)}\nCanale: A{channel}\n"
         text += f"Umidità terreno: {moisture:.1f}%" if isinstance(moisture, (int, float)) else "Umidità terreno: dato non disponibile"
-        keyboard = [[InlineKeyboardButton("⬅️ Le mie piante", callback_data="menu:plants")]]
+        history_token = wizard_token(context, f"{node}:{channel}")
+        keyboard = [
+            [
+                InlineKeyboardButton("Storico 24h", callback_data=f"history:{history_token}:24h"),
+                InlineKeyboardButton("Storico 7g", callback_data=f"history:{history_token}:7g"),
+            ],
+            [InlineKeyboardButton("⬅️ Le mie piante", callback_data="menu:plants")],
+        ]
         await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+def history_text(store: Store, node: str, period: str) -> str | None:
+    since = datetime.now(timezone.utc) - timedelta(hours=24 if period == "24h" else 24 * 7)
+    summary = store.air_summary(node, since.isoformat(timespec="seconds"))
+    light = store.light_summary(node, since.isoformat(timespec="seconds"))
+    if not summary["count"] and not light["count"]:
+        return None
+    lines = [f"{store.node_name(node)} [{node}] - {period}"]
+    if summary["count"]:
+        lines.extend([
+            f"Temperatura C: min {summary['minimum']:.1f}, max {summary['maximum']:.1f}, "
+            f"media {summary['average']:.1f}, ultima {summary['latest']:.1f}",
+            f"Umidita aria media: {summary['humidity_average']:.1f}%",
+            f"Letture aria valide: {summary['count']}",
+        ])
+    else:
+        lines.append("Aria: nessun dato valido")
+    if light["count"]:
+        lines.extend([
+            f"Luce: min {light['minimum']:.1f}, max {light['maximum']:.1f}, "
+            f"media {light['average']:.1f}, ultima {light['latest']:.1f} lux",
+            f"Letture luce valide: {light['count']}",
+        ])
+    else:
+        lines.append("Luce: nessun dato valido")
+    soil_lines = []
+    for plant_node, channel, name, *_ in store.plants():
+        if plant_node != node:
+            continue
+        soil = store.soil_summary(node, channel, since.isoformat(timespec="seconds"))
+        if soil["count"]:
+            soil_lines.append(
+                f"{name} (A{channel}): min {soil['minimum']:.1f}%, max {soil['maximum']:.1f}%, "
+                f"media {soil['average']:.1f}%, ultima {soil['latest']:.1f}%"
+            )
+    if soil_lines:
+        lines.extend(["Umidita terreno:", *soil_lines])
+    return "\n".join(lines)
 
 
 async def configure_command_menu(application: Application) -> None:
@@ -413,8 +472,12 @@ async def configure_command_menu(application: Application) -> None:
             BotCommand("pianta", "mostra il dettaglio di una pianta"),
             BotCommand("rinomina", "cambia nome a una pianta"),
             BotCommand("stato", "controlla i nodi"),
+            BotCommand("status", "controlla i nodi"),
             BotCommand("storico", "mostra l'andamento recente"),
             BotCommand("calibra", "imposta una calibrazione"),
+            BotCommand("cal", "imposta una calibrazione"),
+            BotCommand("node", "imposta il nome di un nodo"),
+            BotCommand("plant", "configura una pianta"),
             BotCommand("whoami", "mostra il tuo ID Telegram"),
         ]
     )
@@ -594,43 +657,11 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     matches = store.find_plants(target)
     node = matches[0][0] if len(matches) == 1 else context.args[0]
     period = context.args[1] if len(context.args) > 1 else "24h"
-    since = datetime.now(timezone.utc) - timedelta(hours=24 if period == "24h" else 24 * 7)
-    summary = store.air_summary(node, since.isoformat(timespec="seconds"))
-    light = store.light_summary(node, since.isoformat(timespec="seconds"))
-    if not summary["count"] and not light["count"]:
+    text = history_text(store, node, period)
+    if text is None:
         await update.effective_message.reply_text(f"Nessun dato valido per {store.node_name(node)} nel periodo {period}.")
         return
-    lines = [f"{store.node_name(node)} [{node}] - {period}"]
-    if summary["count"]:
-        lines.extend([
-            f"Temperatura C: min {summary['minimum']:.1f}, max {summary['maximum']:.1f}, "
-            f"media {summary['average']:.1f}, ultima {summary['latest']:.1f}",
-            f"Umidita aria media: {summary['humidity_average']:.1f}%",
-            f"Letture aria valide: {summary['count']}",
-        ])
-    else:
-        lines.append("Aria: nessun dato valido")
-    if light["count"]:
-        lines.extend([
-            f"Luce: min {light['minimum']:.1f}, max {light['maximum']:.1f}, "
-            f"media {light['average']:.1f}, ultima {light['latest']:.1f} lux",
-            f"Letture luce valide: {light['count']}",
-        ])
-    else:
-        lines.append("Luce: nessun dato valido")
-    await update.effective_message.reply_text("\n".join(lines))
-    soil_lines = []
-    for plant_node, channel, name, *_ in store.plants():
-        if plant_node != node:
-            continue
-        soil = store.soil_summary(node, channel, since.isoformat(timespec="seconds"))
-        if soil["count"]:
-            soil_lines.append(
-                f"{name} (A{channel}): min {soil['minimum']:.1f}%, max {soil['maximum']:.1f}%, "
-                f"media {soil['average']:.1f}%, ultima {soil['latest']:.1f}%"
-            )
-    if soil_lines:
-        await update.effective_message.reply_text("\n".join(["Umidita terreno:", *soil_lines]))
+    await update.effective_message.reply_text(text)
 
 
 async def set_calibration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
