@@ -53,6 +53,13 @@ proprio ID. Questa soluzione è appropriata per più persone fidate; non usare
 un gruppo Telegram come unica misura di sicurezza, perché i comandi devono
 restare vincolati agli utenti esplicitamente autorizzati.
 
+Gli utenti presenti in `TELEGRAM_ALLOWED_USER_IDS` sono amministratori e dal
+menu possono usare `Add User`, incollare un ID numerico e autorizzarlo. `Remove User`
+permette di eliminare gli utenti aggiunti, mentre `Users List` mostra gli
+amministratori dell'ambiente e gli utenti aggiunti. Gli utenti aggiunti vengono
+salvati in SQLite e restano autorizzati dopo il riavvio; gli amministratori
+definiti nell'ambiente non possono essere rimossi dal bot.
+
 Comandi disponibili agli utenti autorizzati:
 
 ```text
@@ -149,18 +156,18 @@ compatibilità, ma applicano le stesse validazioni.
 - [x] Chiedere in sequenza nome pianta, specie, posizione e note opzionali.
 - [x] Consentire di saltare i campi opzionali e correggere l'ultimo campo.
 - [x] Mostrare il riepilogo completo e richiedere conferma finale.
-- [ ] Riutilizzare lo stesso flusso per modificare o riassegnare una pianta.
+- [x] Riutilizzare lo stesso flusso per modificare o riassegnare una pianta.
 
 ### Milestone 3b: azioni sulle piante
 
-- [ ] Aggiungere un pulsante `Rinomina` nel dettaglio della pianta.
-- [ ] Chiedere il nuovo nome in un messaggio separato e mostrare il riepilogo
+- [x] Aggiungere un pulsante `Rinomina` nel dettaglio della pianta.
+- [x] Chiedere il nuovo nome in un messaggio separato e mostrare il riepilogo
 	prima del salvataggio.
-- [ ] Aggiungere pulsanti `Modifica` e `Sposta canale` riutilizzando il wizard,
+- [x] Aggiungere pulsanti `Modifica` e `Sposta canale` riutilizzando il wizard,
 	con scelta del nodo e dei soli canali liberi.
-- [ ] Mostrare nel dettaglio tutti i dati configurati: specie, posizione, note,
+- [x] Mostrare nel dettaglio tutti i dati configurati: specie, posizione, note,
 	soglia e ultima lettura.
-- [ ] Aggiungere pulsanti per lo storico `24h` e `7g` dalla pianta o dal nodo.
+- [x] Aggiungere pulsanti per lo storico `24h` e `7g` dalla pianta o dal nodo.
 - [ ] Aggiungere test per rinomina, modifica, riassegnazione e conflitti.
 
 ### Milestone 4: interfaccia conversazionale coerente
@@ -169,10 +176,10 @@ compatibilità, ma applicano le stesse validazioni.
 	`Configura nodo`, `Le mie piante`, `Stato nodi` e `Aiuto`.
 - [x] Usare callback con identificativi opachi e verificare sempre l'utente
 	autorizzato prima di eseguire un'azione.
-- [ ] Separare handler, stato delle conversazioni e rendering delle tastiere
+- [x] Separare handler, stato delle conversazioni e rendering delle tastiere
 	in moduli testabili.
 - [x] Limitare ogni transizione alle opzioni valide nello stato corrente.
-- [ ] Aggiungere test degli handler e del percorso completo con messaggi e
+- [x] Aggiungere test degli handler e del percorso completo con messaggi e
 	callback simulati.
 
 ### Milestone 4b: configurazione e consultazione a pulsanti
@@ -181,15 +188,15 @@ compatibilità, ma applicano le stesse validazioni.
 - [x] Far scegliere nodo, canale `A0`-`A3` e parametro `dry`, `wet` o soglia da
 	tastiere inline; chiedere soltanto il valore numerico.
 - [x] Chiedere conferma prima dell'invio MQTT della calibrazione.
-- [ ] Aggiungere `Stato nodi` dettagliato, con un pulsante per ogni nodo e ID
+- [x] Aggiungere `Stato nodi` dettagliato, con un pulsante per ogni nodo e ID
 	tecnico sempre visibile.
-- [ ] Aggiungere pulsanti per temperatura, umidità, luce e storico del nodo.
+- [x] Aggiungere pulsanti per temperatura, umidità, luce e storico del nodo.
 - [x] Aggiungere pulsanti storico `24h` e `7g` dal dettaglio della pianta.
 - [x] Rendere navigabili da pulsanti tutte le piante dell'alberatura, senza
 	dipendere dal comando `/pianta`.
 - [ ] Aggiungere navigazione uniforme `Indietro`, `Menu` e `Annulla` a ogni
 	schermata.
-- [ ] Gestire callback scadute, nodi scomparsi e dati non più disponibili senza
+- [x] Gestire callback scadute, nodi scomparsi e dati non più disponibili senza
 	errori visibili all'utente.
 - [ ] Aggiungere test di autorizzazione per ogni callback e test end-to-end dei
 	percorsi principali.

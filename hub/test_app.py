@@ -95,6 +95,21 @@ class HubTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Esiste già"):
                 store.set_plant("node", 1, "basilico")
 
+    def test_store_moves_plant_and_preserves_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node-1", "state", {"state": "online"})
+            store.save("node-2", "state", {"state": "online"})
+            store.set_plant("node-1", 0, "Basilico", "Ocimum", "cucina", "vaso piccolo", 35)
+
+            store.move_plant("node-1", 0, "node-2", 2)
+
+            self.assertEqual(store.channel_plant("node-1", 0), None)
+            self.assertEqual(
+                store.channel_plant("node-2", 2),
+                ("node-2", 2, "Basilico", "Ocimum", "cucina", "vaso piccolo", 35),
+            )
+
     def test_settings_requires_token_and_authorized_users(self):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_ALLOWED_USER_IDS": ""}, clear=False):
             with self.assertRaises(ValueError):
@@ -102,6 +117,16 @@ class HubTests(unittest.TestCase):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_ALLOWED_USER_IDS": "12, 34"}, clear=False):
             settings = Settings.from_environment()
             self.assertEqual(settings.allowed_user_ids, frozenset({12, 34}))
+
+    def test_store_manages_telegram_users(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            self.assertTrue(store.add_telegram_user(42))
+            self.assertFalse(store.add_telegram_user(42))
+            self.assertEqual(store.telegram_users(), [42])
+            self.assertTrue(store.remove_telegram_user(42))
+            self.assertFalse(store.remove_telegram_user(42))
+            self.assertEqual(store.telegram_users(), [])
 
 
 if __name__ == "__main__":

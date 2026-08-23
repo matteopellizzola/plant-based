@@ -106,6 +106,12 @@ class Store:
                 PRIMARY KEY (node, channel)
             )"""
         )
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS telegram_users (
+                user_id INTEGER PRIMARY KEY,
+                added_at TEXT NOT NULL
+            )"""
+        )
         self.connection.commit()
 
     def save(self, node: str, kind: str, payload: dict[str, Any]) -> None:
@@ -259,6 +265,28 @@ class Store:
         normalized_query = query.strip().casefold()
         return [plant for plant in self.plants() if plant[2].casefold() == normalized_query]
 
+    def add_telegram_user(self, user_id: int) -> bool:
+        if user_id <= 0:
+            raise ValueError("L'ID Telegram deve essere un intero positivo")
+        with self.lock:
+            cursor = self.connection.execute(
+                "INSERT OR IGNORE INTO telegram_users(user_id, added_at) VALUES (?, ?)",
+                (user_id, utc_now()),
+            )
+            self.connection.commit()
+        return cursor.rowcount == 1
+
+    def remove_telegram_user(self, user_id: int) -> bool:
+        with self.lock:
+            cursor = self.connection.execute("DELETE FROM telegram_users WHERE user_id = ?", (user_id,))
+            self.connection.commit()
+        return cursor.rowcount == 1
+
+    def telegram_users(self) -> list[int]:
+        with self.lock:
+            rows = self.connection.execute("SELECT user_id FROM telegram_users ORDER BY user_id").fetchall()
+        return [row[0] for row in rows]
+
     def rename_plant(self, current_name: str, new_name: str) -> int:
         matches = self.find_plants(current_name)
         if len(matches) != 1 or not new_name.strip() or self.find_plants(new_name):
@@ -272,6 +300,33 @@ class Store:
             )
             self.connection.commit()
         return 1
+
+    def move_plant(self, node: str, channel: int, target_node: str, target_channel: int) -> None:
+        plant = self.channel_plant(node, channel)
+        if plant is None:
+            raise ValueError("Pianta non disponibile")
+        self.require_node(target_node)
+        if target_channel not in range(4):
+            raise ValueError("channel deve essere compreso tra 0 e 3")
+        if (node, channel) != (target_node, target_channel) and self.channel_plant(target_node, target_channel):
+            raise ValueError("Esiste già una pianta sul canale selezionato")
+        with self.lock:
+            self.connection.execute(
+                """INSERT INTO plant_metadata
+                   (node, channel, name, species, position, notes, threshold_percent, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(node, channel) DO UPDATE SET
+                   name=excluded.name, species=excluded.species, position=excluded.position,
+                   notes=excluded.notes, threshold_percent=excluded.threshold_percent,
+                   updated_at=excluded.updated_at""",
+                (target_node, target_channel, plant[2], plant[3], plant[4], plant[5], plant[6], utc_now()),
+            )
+            if (node, channel) != (target_node, target_channel):
+                self.connection.execute(
+                    "DELETE FROM plant_metadata WHERE node = ? AND channel = ?",
+                    (node, channel),
+                )
+            self.connection.commit()
 
     def latest_measurements(self, node: str) -> dict[str, Any] | None:
         for current_node, kind, payload, _ in self.latest(node):
