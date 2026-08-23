@@ -203,11 +203,11 @@ compatibilità, ma applicano le stesse validazioni.
 
 ### Milestone 5: operazioni distruttive e manutenzione
 
-- [ ] Aggiungere rimozione guidata di pianta e nodo con conferma esplicita.
-- [ ] Separare cancellazione della configurazione, ultimo stato e storico;
+- [x] Aggiungere rimozione guidata di pianta e nodo con conferma esplicita.
+- [x] Separare cancellazione della configurazione, ultimo stato e storico;
 	proporre una scelta chiara invece di eliminare tutto implicitamente.
-- [ ] Mostrare sempre l'ID tecnico coinvolto prima di un'operazione distruttiva.
-- [ ] Registrare nei log chi ha eseguito la modifica e su quale entita'.
+- [x] Mostrare sempre l'ID tecnico coinvolto prima di un'operazione distruttiva.
+- [x] Registrare nei log chi ha eseguito la modifica e su quale entita'.
 
 ### Milestone 6: funzioni future
 

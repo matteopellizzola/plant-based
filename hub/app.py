@@ -418,6 +418,60 @@ async def plant_rename_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return PLANT_RENAME_NAME
 
 
+async def plant_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None:
+        return
+    token = query.data.rsplit(":", 1)[-1]
+    target = wizard_value(context, token)
+    store: Store = context.application.bot_data["store"]
+    if not target or ":" not in target:
+        await query.answer("Questa pianta non è più disponibile.", show_alert=True)
+        return
+    node, channel_text = target.rsplit(":", 1)
+    matches = [plant for plant in store.plants() if plant[0] == node and str(plant[1]) == channel_text]
+    if not matches:
+        await query.answer("Questa pianta non è più disponibile.", show_alert=True)
+        return
+    plant = matches[0]
+    context.user_data["plant_action"] = {"action": "delete", "node": node, "channel": plant[1], "name": plant[2]}
+    await query.answer()
+    await query.message.reply_text(
+        f"Confermi l'eliminazione della pianta?\nNodo tecnico: {node}\nPianta: {plant[2]}\nCanale: A{plant[1]}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Conferma eliminazione", callback_data="plant-action:delete-confirm")],
+            [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+        ]),
+    )
+
+
+async def plant_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None:
+        return
+    action = context.user_data.get("plant_action", {})
+    store: Store = context.application.bot_data["store"]
+    if action.get("action") != "delete":
+        await query.answer("Nessuna pianta da eliminare.", show_alert=True)
+        return
+    node = action.get("node")
+    channel = action.get("channel")
+    if node is None or channel is None or store.channel_plant(node, channel) is None:
+        await query.answer("Questa pianta non è più disponibile.", show_alert=True)
+        return
+    if not store.delete_plant(node, channel):
+        await query.answer("Impossibile eliminare la pianta.", show_alert=True)
+        return
+    user_id = update.effective_user.id if update.effective_user else "unknown"
+    LOGGER.warning("Operazione distruttiva da user_id=%s: elimina pianta %s [nodo=%s canale=A%s]", user_id, action.get("name"), node, channel)
+    await query.answer()
+    await query.message.reply_text(
+        f"✅ Pianta eliminata: {action.get('name')} ({node}, A{channel})",
+        reply_markup=main_keyboard(),
+    )
+    context.user_data.pop("plant_action", None)
+
+
 async def plant_rename_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     action = context.user_data.get("plant_action", {})
     name = update.effective_message.text.strip()
@@ -757,6 +811,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     InlineKeyboardButton("Storico 24h", callback_data=f"node-history:{wizard_token(context, node)}:24h"),
                     InlineKeyboardButton("Storico 7g", callback_data=f"node-history:{wizard_token(context, node)}:7g"),
                 ],
+                [InlineKeyboardButton("🗑️ Elimina nodo", callback_data=f"node-action:delete:{wizard_token(context, node)}")],
                 [InlineKeyboardButton("⬅️ Stato nodi", callback_data="menu:status")],
                 [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
             ]),
@@ -838,10 +893,68 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 InlineKeyboardButton("Rinomina", callback_data=f"plant-action:rename:{plant_token}"),
                 InlineKeyboardButton("Modifica", callback_data=f"plant-action:edit:{plant_token}"),
             ],
-            [InlineKeyboardButton("Sposta canale", callback_data=f"plant-action:move:{plant_token}")],
+            [
+                InlineKeyboardButton("Sposta canale", callback_data=f"plant-action:move:{plant_token}"),
+                InlineKeyboardButton("Elimina pianta", callback_data=f"plant-action:delete:{plant_token}"),
+            ],
             [InlineKeyboardButton("⬅️ Le mie piante", callback_data="menu:plants")],
         ]
         await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+    if query.data and query.data.startswith("plant-action:delete:"):
+        await plant_delete_start(update, context)
+        return
+    if query.data == "plant-action:delete-confirm":
+        await plant_delete_confirm(update, context)
+        return
+    if query.data and query.data.startswith("node-action:delete:"):
+        node = wizard_value(context, query.data.rsplit(":", 1)[-1])
+        if not node or not any(item[0] == node for item in store.known_nodes()):
+            await query.message.reply_text("Questo nodo non è più disponibile.", reply_markup=main_keyboard())
+            return
+        context.user_data["node_action"] = {
+            "action": "delete",
+            "node": node,
+            "clear_configuration": True,
+            "clear_last_state": True,
+            "clear_history": True,
+        }
+        await query.answer()
+        await query.message.reply_text(
+            f"Confermi l'eliminazione del nodo tecnico {node}?\nVerranno rimossi: configurazione, ultimo stato e storico.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Conferma eliminazione", callback_data=f"node-action:delete-confirm:{wizard_token(context, node)}")],
+                [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+            ]),
+        )
+        return
+    if query.data and query.data.startswith("node-action:delete-confirm:"):
+        node = wizard_value(context, query.data.rsplit(":", 1)[-1])
+        action = context.user_data.get("node_action", {})
+        if not node or action.get("node") != node:
+            await query.answer("Nessun nodo da eliminare.", show_alert=True)
+            return
+        deleted = store.delete_node(
+            node,
+            clear_configuration=action.get("clear_configuration", True),
+            clear_last_state=action.get("clear_last_state", True),
+            clear_history=action.get("clear_history", True),
+        )
+        user_id = update.effective_user.id if update.effective_user else "unknown"
+        LOGGER.warning(
+            "Operazione distruttiva da user_id=%s: elimina nodo %s [config=%s stato=%s storico=%s]",
+            user_id,
+            node,
+            deleted["configuration"],
+            deleted["state"],
+            deleted["history"],
+        )
+        await query.answer()
+        await query.message.reply_text(
+            f"✅ Nodo eliminato: {node}\nConfigurazione: {'sì' if deleted['configuration'] else 'no'}\nUltimo stato: {'sì' if deleted['state'] else 'no'}\nStorico: {'sì' if deleted['history'] else 'no'}",
+            reply_markup=main_keyboard(),
+        )
+        context.user_data.pop("node_action", None)
         return
     await query.message.reply_text("Questa azione non è più disponibile.", reply_markup=main_keyboard())
 

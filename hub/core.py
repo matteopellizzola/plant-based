@@ -301,6 +301,57 @@ class Store:
             self.connection.commit()
         return 1
 
+    def delete_plant(self, node: str, channel: int) -> bool:
+        with self.lock:
+            cursor = self.connection.execute(
+                "DELETE FROM plant_metadata WHERE node = ? AND channel = ?",
+                (node, channel),
+            )
+            self.connection.commit()
+        return cursor.rowcount == 1
+
+    def delete_node(
+        self,
+        node: str,
+        *,
+        clear_configuration: bool = True,
+        clear_last_state: bool = True,
+        clear_history: bool = True,
+    ) -> dict[str, bool]:
+        node = node.strip()
+        if not node:
+            raise ValueError("ID nodo mancante")
+        results = {"configuration": False, "state": False, "history": False}
+        with self.lock:
+            if clear_configuration:
+                config_cursor = self.connection.execute(
+                    "DELETE FROM plant_metadata WHERE node = ?",
+                    (node,),
+                )
+                metadata_cursor = self.connection.execute(
+                    "DELETE FROM node_metadata WHERE node = ?",
+                    (node,),
+                )
+                results["configuration"] = config_cursor.rowcount > 0 or metadata_cursor.rowcount > 0
+            if clear_last_state:
+                state_cursor = self.connection.execute(
+                    "DELETE FROM node_messages WHERE node = ? AND kind = 'state'",
+                    (node,),
+                )
+                results["state"] = state_cursor.rowcount > 0
+            if clear_history:
+                measurements_cursor = self.connection.execute(
+                    "DELETE FROM node_messages WHERE node = ? AND kind = 'measurements'",
+                    (node,),
+                )
+                history_cursor = self.connection.execute(
+                    "DELETE FROM measurement_history WHERE node = ?",
+                    (node,),
+                )
+                results["history"] = measurements_cursor.rowcount > 0 or history_cursor.rowcount > 0
+            self.connection.commit()
+        return results
+
     def move_plant(self, node: str, channel: int, target_node: str, target_channel: int) -> None:
         plant = self.channel_plant(node, channel)
         if plant is None:

@@ -110,6 +110,27 @@ class HubTests(unittest.TestCase):
                 ("node-2", 2, "Basilico", "Ocimum", "cucina", "vaso piccolo", 35),
             )
 
+    def test_store_can_delete_plant_and_node_data_selectively(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node-1", "state", {"state": "online"})
+            store.save("node-1", "measurements", {"air": {"valid": True, "temperature_c": 22}})
+            store.save("node-1", "measurements", {"soil": [{"channel": 0, "moisture_percent": 45}]})
+            store.set_plant("node-1", 0, "Basilico")
+            store.set_plant("node-1", 1, "Rosmarino")
+            store.set_node("node-1", "Serra")
+
+            self.assertTrue(store.delete_plant("node-1", 0))
+            self.assertIsNone(store.channel_plant("node-1", 0))
+
+            deleted = store.delete_node("node-1", clear_configuration=True, clear_last_state=True, clear_history=True)
+            self.assertTrue(deleted["configuration"])
+            self.assertTrue(deleted["state"])
+            self.assertTrue(deleted["history"])
+            self.assertEqual(store.known_nodes(), [])
+            self.assertEqual(store.plants(), [])
+            self.assertEqual(store.history("node-1"), [])
+
     def test_settings_requires_token_and_authorized_users(self):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_ALLOWED_USER_IDS": ""}, clear=False):
             with self.assertRaises(ValueError):
