@@ -1,5 +1,7 @@
 """Per-user state helpers for Telegram conversations."""
 
+from __future__ import annotations
+
 import uuid
 from typing import Any
 
