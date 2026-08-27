@@ -265,6 +265,18 @@ class Store:
             )
             self.connection.commit()
 
+    def set_plant_threshold(self, node: str, channel: int, threshold_percent: float) -> None:
+        if not 0 <= threshold_percent <= 100:
+            raise ValueError("La soglia deve essere compresa tra 0 e 100%")
+        with self.lock:
+            cursor = self.connection.execute(
+                "UPDATE plant_metadata SET threshold_percent = ?, updated_at = ? WHERE node = ? AND channel = ?",
+                (threshold_percent, utc_now(), node, channel),
+            )
+            self.connection.commit()
+        if cursor.rowcount != 1:
+            raise ValueError("Pianta non configurata per il canale indicato")
+
     def plants(self) -> list[tuple[str, int, str, str, str, str, float | None]]:
         with self.lock:
             return self.connection.execute(

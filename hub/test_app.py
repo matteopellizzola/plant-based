@@ -120,6 +120,16 @@ class HubTests(unittest.TestCase):
 
             self.assertEqual(store.plant_alerts(), [])
 
+    def test_store_updates_threshold_for_configured_plant(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            store.set_plant("node", 0, "Basilico")
+
+            store.set_plant_threshold("node", 0, 99)
+
+            self.assertEqual(store.plants()[0][-1], 99)
+
     def test_store_moves_plant_and_preserves_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "hub.sqlite3")

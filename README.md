@@ -313,8 +313,9 @@ cal A0 reset
 ```
 
 Misura `dry` con il sensore nel terriccio asciutto e `wet` nel terriccio ben
-bagnato. `threshold` e' una percentuale tra 0 e 100, predisposta per gli avvisi
-futuri. `reset` elimina dalla NVS soltanto la calibrazione del canale indicato e
+bagnato. `threshold` e' una percentuale tra 0 e 100 usata dagli alert Telegram.
+Il comando inviato da Telegram aggiorna sia il nodo sia la configurazione
+della pianta nell'hub. `reset` elimina dalla NVS soltanto la calibrazione del canale indicato e
 riporta ai valori iniziali di `config.h`.
 
 ## Roadmap

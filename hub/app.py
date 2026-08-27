@@ -404,6 +404,13 @@ async def calibration_wizard_confirm(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     wizard = context.user_data.get("wizard", {})
     settings: Settings = context.application.bot_data["settings"]
+    store: Store = context.application.bot_data["store"]
+    if wizard.get("field") == "threshold":
+        try:
+            store.set_plant_threshold(wizard["node"], wizard["channel"], wizard["value"])
+        except ValueError as error:
+            await query.answer(str(error), show_alert=True)
+            return ConversationHandler.END
     client: mqtt.Client = context.application.bot_data["mqtt"]
     topic = f"{settings.topic_prefix}/{wizard['node']}/config"
     client.publish(topic, json.dumps({"channel": wizard["channel"], wizard["field"]: wizard["value"]}), qos=1)
@@ -1429,6 +1436,13 @@ async def set_calibration(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.effective_message.reply_text("La soglia deve essere compresa tra 0 e 100%.")
         return
     settings: Settings = context.application.bot_data["settings"]
+    store: Store = context.application.bot_data["store"]
+    if field == "threshold":
+        try:
+            store.set_plant_threshold(node, int(channel), numeric_value)
+        except ValueError as error:
+            await update.effective_message.reply_text(str(error))
+            return
     client: mqtt.Client = context.application.bot_data["mqtt"]
     topic = f"{settings.topic_prefix}/{node}/config"
     client.publish(topic, json.dumps({"channel": int(channel), field: numeric_value}), qos=1)
