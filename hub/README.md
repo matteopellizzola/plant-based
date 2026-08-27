@@ -71,6 +71,7 @@ Comandi disponibili agli utenti autorizzati:
 /stato
 /storico Basilico 24h
 /status
+/avvisi
 /cal plant-node-01 0 dry 2.700
 /cal plant-node-01 0 wet 1.250
 /cal plant-node-01 0 threshold 35
@@ -102,9 +103,15 @@ massima, media e ultima lettura nel periodo richiesto. La luminosita' viene
 mostrata solo quando il payload del BH1750 e' valido; durata e andamento
 giornaliero sono ancora da implementare.
 
-Il riepilogo non invia ancora notifiche e non formula consigli di irrigazione:
-alert, recap schedulato, andamento giornaliero della luce e registrazione delle
-irrigazioni sono funzioni delle fasi successive.
+`/avvisi` mostra gli alert per umidità del terreno sotto soglia e segnala i dati
+non disponibili. Gli stessi alert vengono inviati automaticamente via Telegram
+agli utenti autorizzati: il controllo avviene ogni 60 secondi e un messaggio
+viene inviato solo quando una condizione entra in allarme o rientra. Un nodo è
+considerato offline dopo 5 minuti senza messaggi; entrambi i valori sono
+configurabili in `hub/.env` con `ALERT_CHECK_INTERVAL_SECONDS` e
+`NODE_OFFLINE_AFTER_SECONDS`. Il bot non formula ancora consigli di
+irrigazione; recap schedulato, andamento giornaliero della luce e registrazione
+delle irrigazioni sono funzioni delle fasi successive.
 
 ## TODO bot Telegram: configurazione guidata e interfaccia a pulsanti
 
@@ -211,7 +218,7 @@ compatibilità, ma applicano le stesse validazioni.
 
 ### Milestone 6: funzioni future
 
-- [ ] Aggiungere alert per umidità sotto soglia e nodi offline.
+- [x] Aggiungere alert per umidità sotto soglia e nodi offline.
 - [ ] Aggiungere recap schedulato configurabile da pulsanti.
 - [ ] Aggiungere andamento giornaliero di temperatura, umidità e luminosità.
 - [ ] Aggiungere registrazione e storico delle irrigazioni quando sarà

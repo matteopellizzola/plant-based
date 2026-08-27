@@ -815,6 +815,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             node_status_text(store), reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
+    if query.data == "menu:alerts":
+        await query.message.reply_text(
+            plant_alerts_text(store), reply_markup=main_keyboard(is_admin(update, settings))
+        )
+        return
     if query.data == "menu:help":
         await query.message.reply_text(HELP_TEXT, reply_markup=main_keyboard())
         return
@@ -1142,6 +1147,59 @@ def node_status_text(store: Store, selected_node: str | None = None) -> str:
     return "\n".join(lines)
 
 
+def plant_alerts_text(store: Store) -> str:
+    alerts = store.plant_alerts()
+    if not alerts:
+        return "✅ Nessun avviso. Le letture disponibili sono sopra le soglie configurate."
+    lines = ["⚠️ Avvisi piante"]
+    for kind, name, node, channel, message in alerts:
+        marker = "🔴" if kind == "alert" else "ℹ️"
+        lines.append(f"{marker} {name} · {message} (A{channel}, {store.node_name(node)})")
+    return "\n".join(lines)
+
+
+async def alert_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    store: Store = context.application.bot_data["store"]
+    current: dict[str, str] = {}
+    expected: set[str] = set()
+    messages: dict[str, str] = {}
+
+    for node, channel, name, _, _, _, threshold in store.plants():
+        missing_key = f"soil-missing:{node}:{channel}"
+        expected.add(missing_key)
+        messages[missing_key] = f"ℹ️ {name}: umidità del terreno non disponibile (A{channel}, {store.node_name(node)})."
+        if threshold is not None:
+            low_key = f"soil-low:{node}:{channel}"
+            expected.add(low_key)
+            messages[low_key] = f"🔴 {name}: umidità del terreno sotto soglia (A{channel}, {store.node_name(node)})."
+
+    for kind, name, node, channel, detail in store.plant_alerts():
+        key = f"soil-{'low' if kind == 'alert' else 'missing'}:{node}:{channel}"
+        current[key] = f"{messages[key]} Lettura: {detail}."
+
+    for node, name, reason in store.offline_node_alerts(settings.node_offline_after_seconds):
+        key = f"node-offline:{node}"
+        expected.add(key)
+        messages[key] = f"🔴 Nodo {name} offline: {reason}."
+        current[key] = messages[key]
+
+    recipients = set(settings.allowed_user_ids) | set(store.telegram_users())
+    for key in expected:
+        changed, previous = store.update_alert_state(key, key in current)
+        if not changed or (key not in current and previous is not True):
+            continue
+        if key in current:
+            text = current[key]
+        else:
+            text = f"✅ Rientrato: {messages.get(key, 'la condizione di allarme non è più presente')}"
+        for user_id in recipients:
+            try:
+                await context.application.bot.send_message(chat_id=user_id, text=text)
+            except Exception:
+                LOGGER.exception("Invio alert Telegram fallito per user_id=%s", user_id)
+
+
 async def configure_command_menu(application: Application) -> None:
     await application.bot.set_my_commands(
         [
@@ -1153,6 +1211,7 @@ async def configure_command_menu(application: Application) -> None:
             BotCommand("stato", "controlla i nodi"),
             BotCommand("status", "controlla i nodi"),
             BotCommand("storico", "mostra l'andamento recente"),
+            BotCommand("avvisi", "mostra alert e dati non disponibili"),
             BotCommand("calibra", "imposta una calibrazione"),
             BotCommand("cal", "imposta una calibrazione"),
             BotCommand("node", "imposta il nome di un nodo"),
@@ -1285,6 +1344,13 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(text)
 
 
+async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await deny_unless_allowed(update, context):
+        return
+    store: Store = context.application.bot_data["store"]
+    await update.effective_message.reply_text(plant_alerts_text(store), reply_markup=main_keyboard())
+
+
 async def set_node_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await deny_unless_allowed(update, context):
         return
@@ -1411,6 +1477,14 @@ def main() -> None:
     mqtt_client.loop_start()
     application = Application.builder().token(settings.telegram_token).post_init(configure_command_menu).build()
     application.bot_data.update(settings=settings, store=store, mqtt=mqtt_client)
+    if application.job_queue is None:
+        raise RuntimeError("Installa python-telegram-bot con l'extra job-queue per gli alert automatici")
+    application.job_queue.run_repeating(
+        alert_job,
+        interval=settings.alert_check_interval_seconds,
+        first=5,
+        name="plant-alerts",
+    )
     application.add_handler(build_user_management_handler())
     application.add_handler(build_wizard_handler())
     application.add_handler(build_plant_action_handler())
@@ -1418,6 +1492,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler(["status", "stato"], status))
+    application.add_handler(CommandHandler("avvisi", alerts))
     application.add_handler(CommandHandler("piante", plants))
     application.add_handler(CommandHandler("pianta", plant_detail))
     application.add_handler(CommandHandler("rinomina", rename_plant))

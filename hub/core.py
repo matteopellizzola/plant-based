@@ -27,6 +27,8 @@ class Settings:
     telegram_token: str
     allowed_user_ids: frozenset[int]
     database_path: Path
+    alert_check_interval_seconds: int = 60
+    node_offline_after_seconds: int = 300
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -46,6 +48,8 @@ class Settings:
             telegram_token=token,
             allowed_user_ids=allowed_ids,
             database_path=Path(os.getenv("DATABASE_PATH", "hub/data/plant_hub.sqlite3")),
+            alert_check_interval_seconds=max(15, int(os.getenv("ALERT_CHECK_INTERVAL_SECONDS", "60"))),
+            node_offline_after_seconds=max(60, int(os.getenv("NODE_OFFLINE_AFTER_SECONDS", "300"))),
         )
 
 
@@ -110,6 +114,13 @@ class Store:
             """CREATE TABLE IF NOT EXISTS telegram_users (
                 user_id INTEGER PRIMARY KEY,
                 added_at TEXT NOT NULL
+            )"""
+        )
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS alert_states (
+                alert_key TEXT PRIMARY KEY,
+                active INTEGER NOT NULL,
+                updated_at TEXT NOT NULL
             )"""
         )
         self.connection.commit()
@@ -384,6 +395,57 @@ class Store:
             if current_node == node and kind == "measurements":
                 return payload
         return None
+
+    def plant_alerts(self) -> list[tuple[str, str, str, int, str]]:
+        """Return current plant alerts and informational messages."""
+        alerts: list[tuple[str, str, str, int, str]] = []
+        for node, channel, name, _, _, _, threshold in self.plants():
+            payload = self.latest_measurements(node) or {}
+            soil = payload.get("soil", [])
+            reading = next(
+                (item for item in soil if isinstance(item, dict) and item.get("channel") == channel),
+                None,
+            ) if isinstance(soil, list) else None
+            moisture = reading.get("moisture_percent") if reading else None
+            if not isinstance(moisture, (int, float)) or not 0 <= moisture <= 100:
+                alerts.append(("info", name, node, channel, "umidità del terreno non disponibile"))
+            elif threshold is not None and moisture < threshold:
+                alerts.append(("alert", name, node, channel, f"umidità del terreno {moisture:.1f}% (soglia {threshold:.0f}%)"))
+        return alerts
+
+    def offline_node_alerts(self, after_seconds: int) -> list[tuple[str, str, str]]:
+        now = datetime.now(timezone.utc)
+        alerts: list[tuple[str, str, str]] = []
+        for node, name, received_at in self.known_nodes():
+            if not received_at:
+                reason = "nessuna connessione MQTT confermata"
+            elif self.node_status(node) == "offline":
+                reason = "il nodo ha dichiarato lo stato offline"
+            else:
+                try:
+                    last_seen = datetime.fromisoformat(received_at)
+                except ValueError:
+                    continue
+                if (now - last_seen).total_seconds() <= after_seconds:
+                    continue
+                reason = f"nessun messaggio da {(now - last_seen).total_seconds() / 60:.0f} minuti"
+            alerts.append((node, name or node, reason))
+        return alerts
+
+    def update_alert_state(self, alert_key: str, active: bool) -> tuple[bool, bool | None]:
+        """Store an alert state and return (changed, previous state)."""
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT active FROM alert_states WHERE alert_key = ?", (alert_key,)
+            ).fetchone()
+            changed = row is None or bool(row[0]) != active
+            self.connection.execute(
+                """INSERT INTO alert_states(alert_key, active, updated_at) VALUES (?, ?, ?)
+                   ON CONFLICT(alert_key) DO UPDATE SET active=excluded.active, updated_at=excluded.updated_at""",
+                (alert_key, int(active), utc_now()),
+            )
+            self.connection.commit()
+        return changed, None if row is None else bool(row[0])
 
     def air_summary(self, node: str, since: str | None = None) -> dict[str, float | int | None]:
         temperatures: list[float] = []

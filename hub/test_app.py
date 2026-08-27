@@ -95,6 +95,31 @@ class HubTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Esiste già"):
                 store.set_plant("node", 1, "basilico")
 
+    def test_store_reports_low_moisture_and_missing_readings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            store.set_plant("node", 0, "Basilico", threshold_percent=35)
+            store.set_plant("node", 1, "Rosmarino")
+            store.save("node", "measurements", {"soil": [{"channel": 0, "moisture_percent": 20}]})
+
+            self.assertEqual(
+                store.plant_alerts(),
+                [
+                    ("alert", "Basilico", "node", 0, "umidità del terreno 20.0% (soglia 35%)"),
+                    ("info", "Rosmarino", "node", 1, "umidità del terreno non disponibile"),
+                ],
+            )
+
+    def test_store_reports_no_alert_when_moisture_is_above_threshold(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            store.set_plant("node", 0, "Basilico", threshold_percent=35)
+            store.save("node", "measurements", {"soil": [{"channel": 0, "moisture_percent": 40}]})
+
+            self.assertEqual(store.plant_alerts(), [])
+
     def test_store_moves_plant_and_preserves_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "hub.sqlite3")

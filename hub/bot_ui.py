@@ -10,6 +10,7 @@ HELP_TEXT = """🌿 Comandi disponibili
 /rinomina VECCHIO | NUOVO - cambia nome a una pianta
 /stato - stato dei nodi collegati
 /storico NOME [24h|7g] - andamento recente
+/avvisi - alert e dati non disponibili
 
 ⚙️ Configurazione
 /calibra NODE CANALE dry|wet|soglia VALORE
@@ -29,6 +30,7 @@ def main_keyboard(include_user_admin: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⚙️ Configura nodo", callback_data="wizard:node:start")],
         [InlineKeyboardButton("🛠️ Calibra sensore", callback_data="wizard:cal:start")],
         [InlineKeyboardButton("🌱 Le mie piante", callback_data="menu:plants")],
+        [InlineKeyboardButton("⚠️ Avvisi", callback_data="menu:alerts")],
         [InlineKeyboardButton("📊 Stato nodi", callback_data="menu:status")],
         [InlineKeyboardButton("❓ Aiuto", callback_data="menu:help")],
     ]

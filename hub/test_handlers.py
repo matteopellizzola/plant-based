@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 try:
-    from app import button_click, start
+    from app import alert_job, button_click, start
     from core import Settings, Store
     from conversation_state import wizard_token
 except ModuleNotFoundError as error:
@@ -123,6 +123,25 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
                 for button in row
             ]
             self.assertIn("menu:home", callbacks)
+
+    async def test_alert_job_notifies_on_transition_and_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            store.set_plant("node", 0, "Basilico", threshold_percent=35)
+            store.save("node", "measurements", {"soil": [{"channel": 0, "moisture_percent": 20}]})
+            context = self.make_context(store)
+            context.application.bot = SimpleNamespace(send_message=AsyncMock())
+
+            await alert_job(context)
+            await alert_job(context)
+            self.assertEqual(context.application.bot.send_message.await_count, 1)
+            self.assertIn("sotto soglia", context.application.bot.send_message.await_args.kwargs["text"])
+
+            store.save("node", "measurements", {"soil": [{"channel": 0, "moisture_percent": 40}]})
+            await alert_job(context)
+            self.assertEqual(context.application.bot.send_message.await_count, 2)
+            self.assertIn("Rientrato", context.application.bot.send_message.await_args.kwargs["text"])
 
 
 if __name__ == "__main__":
