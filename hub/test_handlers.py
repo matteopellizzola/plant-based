@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 try:
     from app import button_click, start
     from core import Settings, Store
+    from conversation_state import wizard_token
 except ModuleNotFoundError as error:
     button_click = None
     start = None
@@ -84,6 +85,44 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
                 "Accesso non autorizzato.", show_alert=True
             )
             update.callback_query.message.reply_text.assert_not_awaited()
+
+    async def test_status_callback_renders_node_sections_and_navigation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            update = self.make_update(callback_data="menu:status")
+            context = self.make_context(store)
+
+            await button_click(update, context)
+
+            message = update.callback_query.message.reply_text.await_args
+            self.assertIn("STATO NODI", message.args[0])
+            callbacks = [
+                button.callback_data
+                for row in message.kwargs["reply_markup"].inline_keyboard
+                for button in row
+            ]
+            self.assertIn("menu:home", callbacks)
+
+    async def test_plant_history_callback_includes_back_navigation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            store.set_plant("node", 0, "Basilico")
+            store.save("node", "measurements", {"air": {"valid": True, "temperature_c": 20, "humidity_percent": 45}})
+            context = self.make_context(store)
+            token = wizard_token(context, "node:0")
+            update = self.make_update(callback_data=f"history:{token}:24h")
+
+            await button_click(update, context)
+
+            message = update.callback_query.message.reply_text.await_args
+            callbacks = [
+                button.callback_data
+                for row in message.kwargs["reply_markup"].inline_keyboard
+                for button in row
+            ]
+            self.assertIn("menu:home", callbacks)
 
 
 if __name__ == "__main__":

@@ -50,6 +50,13 @@ def user_admin_keyboard() -> InlineKeyboardMarkup:
 
 def cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
+    ])
+
+
+def navigation_keyboard(back_callback: str, back_label: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"⬅️ {back_label}", callback_data=back_callback)],
         [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
     ])

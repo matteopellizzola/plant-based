@@ -17,7 +17,7 @@ from telegram.ext import (
     ConversationHandler, MessageHandler, filters,
 )
 
-from bot_ui import HELP_TEXT, cancel_keyboard, main_keyboard, user_admin_keyboard
+from bot_ui import HELP_TEXT, cancel_keyboard, main_keyboard, navigation_keyboard, user_admin_keyboard
 from conversation_state import wizard_token, wizard_value
 from core import Settings, Store, topic_parts
 
@@ -117,7 +117,10 @@ async def node_wizard_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     for node, name, _ in nodes:
         label = f"{node} · {name or 'senza nome'} · {store.node_status(node)}"
         buttons.append([InlineKeyboardButton(label, callback_data=f"wizard:node:select:{wizard_token(context, node)}")])
-    buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
+    buttons.extend([
+        [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
+    ])
     await query.message.reply_text("Scegli il nodo da configurare:", reply_markup=InlineKeyboardMarkup(buttons))
     return NODE_NAME
 
@@ -149,7 +152,7 @@ async def node_wizard_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     wizard["name"] = name
     await update.effective_message.reply_text(
         f"Confermi?\nNodo tecnico: {node}\nNuovo nome: {name}",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Conferma", callback_data="wizard:node:confirm"), InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Conferma", callback_data="wizard:node:confirm")], [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")], [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")]]),
     )
     return NODE_NAME
 
@@ -181,7 +184,10 @@ async def plant_wizard_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.message.reply_text("Nessun nodo conosciuto. Accendi un nodo e attendi il primo messaggio MQTT.")
         return ConversationHandler.END
     buttons = [[InlineKeyboardButton(f"{node} · {name or 'senza nome'} · {store.node_status(node)}", callback_data=f"wizard:plant:node:{wizard_token(context, node)}")] for node, name, _ in nodes]
-    buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
+    buttons.extend([
+        [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
+    ])
     await query.message.reply_text("Scegli il nodo della pianta:", reply_markup=InlineKeyboardMarkup(buttons))
     return PLANT_NODE
 
@@ -200,7 +206,10 @@ async def plant_wizard_node(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         plant = store.channel_plant(node, channel)
         if plant is None:
             buttons.append([InlineKeyboardButton(f"A{channel} · libero", callback_data=f"wizard:plant:channel:{channel}")])
-    buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
+    buttons.extend([
+        [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
+    ])
     await query.answer()
     await query.message.reply_text("Scegli un canale libero:", reply_markup=InlineKeyboardMarkup(buttons))
     return PLANT_CHANNEL
@@ -239,11 +248,11 @@ async def plant_wizard_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if next_prompt is None:
         await update.effective_message.reply_text(
             f"Confermi?\nNodo: {wizard['node']}\nCanale: A{wizard['channel']}\nPianta: {wizard['name']}\nSpecie: {wizard.get('species') or '-'}\nPosizione: {wizard.get('position') or '-'}\nNote: {wizard.get('notes') or '-'}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Conferma", callback_data="wizard:plant:confirm"), InlineKeyboardButton("Correggi note", callback_data="wizard:plant:edit-notes")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Conferma", callback_data="wizard:plant:confirm"), InlineKeyboardButton("✏️ Correggi note", callback_data="wizard:plant:edit-notes")], [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")], [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")]]),
         )
         return PLANT_CONFIRM
     context.user_data["wizard_state"] = state + 1
-    keyboard = [[InlineKeyboardButton("Salta", callback_data="wizard:skip")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]] if state in {PLANT_SPECIES, PLANT_POSITION, PLANT_NOTES} else cancel_keyboard().inline_keyboard
+    keyboard = [[InlineKeyboardButton("⏭️ Salta", callback_data="wizard:skip")], [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")], [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")]] if state in {PLANT_SPECIES, PLANT_POSITION, PLANT_NOTES} else cancel_keyboard().inline_keyboard
     await update.effective_message.reply_text(next_prompt, reply_markup=InlineKeyboardMarkup(keyboard))
     return state + 1
 
@@ -257,10 +266,10 @@ async def plant_wizard_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     wizard[field] = ""
     await query.answer()
     if next_prompt is None:
-        await query.message.reply_text("Inserisci le note opzionali oppure conferma direttamente.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Conferma", callback_data="wizard:plant:confirm")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]))
+        await query.message.reply_text("Inserisci le note opzionali oppure conferma direttamente.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Conferma", callback_data="wizard:plant:confirm")], [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")], [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")]]))
         return PLANT_CONFIRM
     context.user_data["wizard_state"] = state + 1
-    await query.message.reply_text(next_prompt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Salta", callback_data="wizard:skip")], [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")]]))
+    await query.message.reply_text(next_prompt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⏭️ Salta", callback_data="wizard:skip")], [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")], [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")]]))
     return state + 1
 
 
@@ -287,8 +296,9 @@ async def plant_wizard_edit_notes(update: Update, context: ContextTypes.DEFAULT_
     await query.message.reply_text(
         "Nuove note (oppure premi Salta):",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Salta", callback_data="wizard:skip")],
-            [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+            [InlineKeyboardButton("⏭️ Salta", callback_data="wizard:skip")],
+            [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+            [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
         ]),
     )
     return PLANT_NOTES
@@ -309,7 +319,10 @@ async def calibration_wizard_start(update: Update, context: ContextTypes.DEFAULT
         [InlineKeyboardButton(f"{node} · {name or 'senza nome'} · {store.node_status(node)}", callback_data=f"wizard:cal:node:{wizard_token(context, node)}")]
         for node, name, _ in nodes
     ]
-    buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
+    buttons.extend([
+        [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
+    ])
     await query.message.reply_text("Scegli il nodo da calibrare:", reply_markup=InlineKeyboardMarkup(buttons))
     return CAL_NODE
 
@@ -324,7 +337,10 @@ async def calibration_wizard_node(update: Update, context: ContextTypes.DEFAULT_
     context.user_data["wizard"] = {"type": "calibration", "node": node}
     await query.answer()
     buttons = [[InlineKeyboardButton(f"A{channel}", callback_data=f"wizard:cal:channel:{channel}")] for channel in range(4)]
-    buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
+    buttons.extend([
+        [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
+    ])
     await query.message.reply_text("Scegli il canale del sensore:", reply_markup=InlineKeyboardMarkup(buttons))
     return CAL_CHANNEL
 
@@ -341,7 +357,8 @@ async def calibration_wizard_channel(update: Update, context: ContextTypes.DEFAU
         [InlineKeyboardButton("Dry", callback_data="wizard:cal:field:dry")],
         [InlineKeyboardButton("Wet", callback_data="wizard:cal:field:wet")],
         [InlineKeyboardButton("Soglia", callback_data="wizard:cal:field:threshold")],
-        [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
     ]
     await query.message.reply_text("Scegli il parametro da impostare:", reply_markup=InlineKeyboardMarkup(buttons))
     return CAL_FIELD
@@ -375,8 +392,9 @@ async def calibration_wizard_value(update: Update, context: ContextTypes.DEFAULT
     await update.effective_message.reply_text(
         f"Confermi la calibrazione?\nNodo: {wizard['node']}\nCanale: A{wizard['channel']}\nParametro: {label}\nValore: {value:g}",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Conferma", callback_data="wizard:cal:confirm")],
-            [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+            [InlineKeyboardButton("✅ Conferma", callback_data="wizard:cal:confirm")],
+            [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+            [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
         ]),
     )
     return CAL_CONFIRM
@@ -439,8 +457,9 @@ async def plant_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.message.reply_text(
         f"Confermi l'eliminazione della pianta?\nNodo tecnico: {node}\nPianta: {plant[2]}\nCanale: A{plant[1]}",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Conferma eliminazione", callback_data="plant-action:delete-confirm")],
-            [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+            [InlineKeyboardButton("🗑️ Conferma eliminazione", callback_data="plant-action:delete-confirm")],
+            [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+            [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
         ]),
     )
 
@@ -488,8 +507,9 @@ async def plant_rename_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await update.effective_message.reply_text(
         f"Confermi la rinomina?\nNome attuale: {action['name']}\nNome nuovo: {name}",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Conferma", callback_data="plant-action:rename-confirm")],
-            [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+            [InlineKeyboardButton("✅ Conferma", callback_data="plant-action:rename-confirm")],
+            [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+            [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
         ]),
     )
     return PLANT_RENAME_CONFIRM
@@ -544,7 +564,10 @@ async def plant_move_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         [InlineKeyboardButton(f"{node} · {name or 'senza nome'}", callback_data=f"plant-action:move-node:{wizard_token(context, node)}")]
         for node, name, _ in store.known_nodes()
     ]
-    buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
+    buttons.extend([
+        [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
+    ])
     await query.answer()
     await query.message.reply_text("Scegli il nuovo nodo:", reply_markup=InlineKeyboardMarkup(buttons))
     return PLANT_MOVE_NODE
@@ -564,7 +587,10 @@ async def plant_move_node(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         occupied = store.channel_plant(node, channel)
         if occupied is None or (node == action.get("node") and channel == action.get("channel")):
             buttons.append([InlineKeyboardButton(f"A{channel}", callback_data=f"plant-action:move-channel:{wizard_token(context, f'{node}:{channel}')}")])
-    buttons.append([InlineKeyboardButton("Annulla", callback_data="wizard:cancel")])
+    buttons.extend([
+        [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
+    ])
     await query.answer()
     await query.message.reply_text("Scegli il nuovo canale libero:", reply_markup=InlineKeyboardMarkup(buttons))
     return PLANT_MOVE_CHANNEL
@@ -589,8 +615,9 @@ async def plant_move_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.message.reply_text(
         f"Confermi lo spostamento di {action['name']}?\nDa: {action['node']} A{action['channel']}\nA: {node} A{channel}",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Conferma", callback_data="plant-action:move-confirm")],
-            [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+            [InlineKeyboardButton("✅ Conferma", callback_data="plant-action:move-confirm")],
+            [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+            [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
         ]),
     )
     return PLANT_MOVE_CONFIRM
@@ -826,10 +853,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if metric not in {"temperature", "humidity", "light"} or not any(item[0] == node for item in store.known_nodes()):
             await query.message.reply_text("Questo nodo non è più disponibile.", reply_markup=main_keyboard())
             return
-        await query.message.reply_text(node_metric_text(store, node, metric), reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Dettaglio nodo", callback_data=f"node:{wizard_token(context, node)}")],
-            [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
-        ]))
+        await query.message.reply_text(
+            node_metric_text(store, node, metric),
+            reply_markup=navigation_keyboard(f"node:{wizard_token(context, node)}", "Dettaglio nodo"),
+        )
         return
     if query.data and query.data.startswith("node-history:"):
         _, token, period = query.data.split(":", 2)
@@ -839,7 +866,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             return
         await query.message.reply_text(
             history_text(store, node, period) or f"Nessun dato valido per {store.node_name(node)} nel periodo {period}.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Dettaglio nodo", callback_data=f"node:{wizard_token(context, node)}")], [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")]]),
+            reply_markup=navigation_keyboard(f"node:{wizard_token(context, node)}", "Dettaglio nodo"),
         )
         return
     if query.data and query.data.startswith("history:"):
@@ -853,7 +880,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await query.message.reply_text("Questa pianta non è più disponibile.", reply_markup=main_keyboard())
             return
         text = history_text(store, node, period)
-        await query.message.reply_text(text or f"Nessun dato valido per {store.node_name(node)} nel periodo {period}.")
+        await query.message.reply_text(
+            text or f"Nessun dato valido per {store.node_name(node)} nel periodo {period}.",
+            reply_markup=navigation_keyboard(
+                f"plant:{wizard_token(context, f'{node}:{channel_text}')}", "Dettaglio pianta"
+            ),
+        )
         return
     if query.data and query.data.startswith("plant:"):
         target = wizard_value(context, query.data.split(":", 1)[1])
@@ -898,6 +930,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 InlineKeyboardButton("Elimina pianta", callback_data=f"plant-action:delete:{plant_token}"),
             ],
             [InlineKeyboardButton("⬅️ Le mie piante", callback_data="menu:plants")],
+            [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
         ]
         await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
@@ -923,8 +956,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text(
             f"Confermi l'eliminazione del nodo tecnico {node}?\nVerranno rimossi: configurazione, ultimo stato e storico.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Conferma eliminazione", callback_data=f"node-action:delete-confirm:{wizard_token(context, node)}")],
-                [InlineKeyboardButton("Annulla", callback_data="wizard:cancel")],
+                [InlineKeyboardButton("🗑️ Conferma eliminazione", callback_data=f"node-action:delete-confirm:{wizard_token(context, node)}")],
+                [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
             ]),
         )
         return
@@ -961,41 +995,80 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 def history_text(store: Store, node: str, period: str) -> str | None:
     since = datetime.now(timezone.utc) - timedelta(hours=24 if period == "24h" else 24 * 7)
-    summary = store.air_summary(node, since.isoformat(timespec="seconds"))
-    light = store.light_summary(node, since.isoformat(timespec="seconds"))
+    since_text = since.isoformat(timespec="seconds")
+    history = store.history(node, since_text)
+    summary = store.air_summary(node, since_text)
+    light = store.light_summary(node, since_text)
     if not summary["count"] and not light["count"]:
         return None
-    lines = [f"{store.node_name(node)} [{node}] - {period}"]
+    temperature_values = []
+    humidity_values = []
+    light_values = []
+    for _, payload, _ in history:
+        air = payload.get("air", {})
+        if isinstance(air, dict) and air.get("valid"):
+            if isinstance(air.get("temperature_c"), (int, float)):
+                temperature_values.append(float(air["temperature_c"]))
+            if isinstance(air.get("humidity_percent"), (int, float)):
+                humidity_values.append(float(air["humidity_percent"]))
+        current_light = payload.get("light", {})
+        if (
+            isinstance(current_light, dict)
+            and current_light.get("valid")
+            and isinstance(current_light.get("lux"), (int, float))
+            and current_light["lux"] >= 0
+        ):
+            light_values.append(float(current_light["lux"]))
+
+    lines = [f"📈 STORICO {period} · {store.node_name(node)}", f"Nodo tecnico: {node}", ""]
     if summary["count"]:
-        lines.extend([
-            f"Temperatura C: min {summary['minimum']:.1f}, max {summary['maximum']:.1f}, "
-            f"media {summary['average']:.1f}, ultima {summary['latest']:.1f}",
-            f"Umidita aria media: {summary['humidity_average']:.1f}%",
-            f"Letture aria valide: {summary['count']}",
-        ])
+        lines.extend(["🌡️ ARIA", f"Temperatura: {summary['minimum']:.1f} / {summary['average']:.1f} / {summary['maximum']:.1f} °C", f"Andamento: {sparkline(temperature_values)}"])
+        if summary["humidity_average"] is not None:
+            lines.extend([f"Umidità media: {summary['humidity_average']:.1f}%", f"Andamento: {sparkline(humidity_values)}"])
+        lines.append(f"Letture valide: {summary['count']}")
     else:
-        lines.append("Aria: nessun dato valido")
+        lines.extend(["🌡️ ARIA", "Nessun dato valido"])
     if light["count"]:
-        lines.extend([
-            f"Luce: min {light['minimum']:.1f}, max {light['maximum']:.1f}, "
-            f"media {light['average']:.1f}, ultima {light['latest']:.1f} lux",
-            f"Letture luce valide: {light['count']}",
-        ])
+        lines.extend(["", "💡 LUCE", f"Minima / media / massima: {light['minimum']:.1f} / {light['average']:.1f} / {light['maximum']:.1f} lux", f"Andamento: {sparkline(light_values)}", f"Letture valide: {light['count']}"])
     else:
-        lines.append("Luce: nessun dato valido")
+        lines.extend(["", "💡 LUCE", "Nessun dato valido"])
     soil_lines = []
     for plant_node, channel, name, *_ in store.plants():
         if plant_node != node:
             continue
-        soil = store.soil_summary(node, channel, since.isoformat(timespec="seconds"))
+        soil = store.soil_summary(node, channel, since_text)
         if soil["count"]:
+            soil_values = [
+                float(item["moisture_percent"])
+                for _, payload, _ in history
+                for item in payload.get("soil", [])
+                if isinstance(payload.get("soil", []), list)
+                and isinstance(item, dict) and item.get("channel") == channel
+                and isinstance(item.get("moisture_percent"), (int, float))
+                and 0 <= item["moisture_percent"] <= 100
+            ]
             soil_lines.append(
-                f"{name} (A{channel}): min {soil['minimum']:.1f}%, max {soil['maximum']:.1f}%, "
-                f"media {soil['average']:.1f}%, ultima {soil['latest']:.1f}%"
+                f"🌱 {name} (A{channel})\n"
+                f"   Minima / media / massima: {soil['minimum']:.1f} / {soil['average']:.1f} / {soil['maximum']:.1f}%\n"
+                f"   Andamento: {sparkline(soil_values)}"
             )
     if soil_lines:
-        lines.extend(["Umidita terreno:", *soil_lines])
+        lines.extend(["", "🌱 UMIDITÀ TERRENO", *soil_lines])
     return "\n".join(lines)
+
+
+def sparkline(values: list[float], width: int = 18) -> str:
+    """Render a compact, dependency-free trend line for Telegram messages."""
+    if not values:
+        return "n/d"
+    if len(values) > width:
+        step = (len(values) - 1) / (width - 1)
+        values = [values[round(index * step)] for index in range(width)]
+    minimum, maximum = min(values), max(values)
+    levels = "▁▂▃▄▅▆▇█"
+    if maximum == minimum:
+        return levels[3] * len(values)
+    return "".join(levels[round((value - minimum) / (maximum - minimum) * (len(levels) - 1))] for value in values)
 
 
 def node_metric_text(store: Store, node: str, metric: str) -> str:
@@ -1023,7 +1096,7 @@ def node_status_text(store: Store, selected_node: str | None = None) -> str:
     if not nodes:
         return "Nodo non disponibile." if selected_node else "Nessun nodo conosciuto."
 
-    lines = ["📊 Stato nodo · ultime 24h" if selected_node else "📊 Stato nodi · ultime 24h"]
+    lines = ["📊 STATO NODO · ultime 24h" if selected_node else "📊 STATO NODI · ultime 24h", ""]
     for node, name, _ in nodes:
         state = next(
             (payload.get("state") for current_node, kind, payload, _ in store.latest(node)
@@ -1031,9 +1104,11 @@ def node_status_text(store: Store, selected_node: str | None = None) -> str:
             "n/d",
         )
         lines.extend([
+            f"🛰️ {name or node}",
+            f"ID tecnico: {node}",
+            f"Stato: {'🟢 online' if state == 'online' else '🔴 ' + str(state)}",
             "",
-            f"{name or node} [{node}] · {state}",
-            "├─ Piante",
+            "🌿 PIANTE",
         ])
         node_plants = [plant for plant in plants if plant[0] == node]
         if node_plants:
@@ -1041,28 +1116,29 @@ def node_status_text(store: Store, selected_node: str | None = None) -> str:
                 soil = store.soil_summary(node, channel, since)
                 branch = "└─" if index == len(node_plants) - 1 else "├─"
                 moisture = f"{soil['average']:.1f}%" if soil["count"] else "n/d"
-                lines.append(f"│  {branch} {plant_name} (A{channel}): {moisture} umidità media")
+                lines.append(f"{branch} {plant_name} · A{channel} · 💧 {moisture} media")
         else:
-            lines.append("│  └─ nessuna pianta configurata")
+            lines.append("└─ Nessuna pianta configurata")
 
         air = store.air_summary(node, since)
         light = store.light_summary(node, since)
-        lines.append("├─ Aria")
+        lines.extend(["", "🌡️ ARIA"])
         if air["count"]:
             lines.append(
-                f"│  └─ temperatura: media {air['average']:.1f} °C, "
+                f"Temperatura: media {air['average']:.1f} °C, "
                 f"min {air['minimum']:.1f} °C, max {air['maximum']:.1f} °C"
             )
         else:
-            lines.append("│  └─ temperatura: n/d")
-        lines.append("└─ Luce")
+            lines.append("Temperatura: n/d")
+        lines.append("\n💡 LUCE")
         if light["count"]:
             lines.append(
-                f"   └─ luminosità: media {light['average']:.1f} lux, "
+                f"Luminosità: media {light['average']:.1f} lux, "
                 f"min {light['minimum']:.1f} lux, max {light['maximum']:.1f} lux"
             )
         else:
-            lines.append("   └─ luminosità: n/d")
+            lines.append("Luminosità: n/d")
+        lines.append("")
     return "\n".join(lines)
 
 

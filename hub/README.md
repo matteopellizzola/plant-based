@@ -118,9 +118,9 @@ compatibilità, ma applicano le stesse validazioni.
 	`Stato nodi` e `Aiuto`.
 - [x] Scelta del nodo e del canale nel wizard di aggiunta pianta.
 - [x] Conferma e annullamento delle configurazioni guidate.
-- [ ] Pulsante di ritorno al menu in ogni schermata e gestione coerente del
+- [x] Pulsante di ritorno al menu in ogni schermata e gestione coerente del
 	pulsante `Annulla`.
-- [ ] Nessuna funzione deve richiedere di digitare un ID tecnico quando può
+- [x] Nessuna funzione deve richiedere di digitare un ID tecnico quando può
 	essere scelto da una tastiera.
 
 ### Milestone 1: integrita' dei dati
@@ -194,7 +194,7 @@ compatibilità, ma applicano le stesse validazioni.
 - [x] Aggiungere pulsanti storico `24h` e `7g` dal dettaglio della pianta.
 - [x] Rendere navigabili da pulsanti tutte le piante dell'alberatura, senza
 	dipendere dal comando `/pianta`.
-- [ ] Aggiungere navigazione uniforme `Indietro`, `Menu` e `Annulla` a ogni
+- [x] Aggiungere navigazione uniforme `Indietro`, `Menu` e `Annulla` a ogni
 	schermata.
 - [x] Gestire callback scadute, nodi scomparsi e dati non più disponibili senza
 	errori visibili all'utente.
