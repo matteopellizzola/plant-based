@@ -124,7 +124,31 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
             ]
             self.assertIn("menu:home", callbacks)
 
-    async def test_alert_job_notifies_on_transition_and_recovery(self):
+    async def test_plant_detail_callback_includes_air_and_light(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            store.set_plant("node", 0, "Basilico")
+            store.save(
+                "node",
+                "measurements",
+                {
+                    "soil": [{"channel": 0, "moisture_percent": 42}],
+                    "air": {"valid": True, "temperature_c": 21.5, "humidity_percent": 53},
+                    "light": {"valid": True, "lux": 340},
+                },
+            )
+            context = self.make_context(store)
+            token = wizard_token(context, "node:0")
+            update = self.make_update(callback_data=f"plant:{token}")
+
+            await button_click(update, context)
+
+            text = update.callback_query.message.reply_text.await_args.args[0]
+            self.assertIn("Aria: 21.5 °C · 53% umidità", text)
+            self.assertIn("Luce: 340.0 lux", text)
+
+    async def test_low_moisture_warning_stays_open_until_watering_is_recorded(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "hub.sqlite3")
             store.save("node", "state", {"state": "online"})
@@ -140,8 +164,14 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
 
             store.save("node", "measurements", {"soil": [{"channel": 0, "moisture_percent": 40}]})
             await alert_job(context)
+            self.assertEqual(context.application.bot.send_message.await_count, 1)
+            self.assertIn("ancora aperto", store.plant_alerts()[0][-1])
+
+            store.record_watering("node", 0, 42)
+            self.assertEqual(store.plant_alerts(), [])
+            store.save("node", "measurements", {"soil": [{"channel": 0, "moisture_percent": 20}]})
+            await alert_job(context)
             self.assertEqual(context.application.bot.send_message.await_count, 2)
-            self.assertIn("Rientrato", context.application.bot.send_message.await_args.kwargs["text"])
 
 
 if __name__ == "__main__":

@@ -5,12 +5,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 HELP_TEXT = """🌿 Comandi disponibili
 
 📋 Consultazione
-/piante - elenco delle piante configurate
-/pianta NOME - dettaglio e ultima lettura
 /rinomina VECCHIO | NUOVO - cambia nome a una pianta
-/stato - stato dei nodi collegati
 /storico NOME [24h|7g] - andamento recente
 /avvisi - alert e dati non disponibili
+/annaffia NOME - registra un'annaffiatura e chiude il relativo avviso
+/recap - mostra ora il recap giornaliero
 
 ⚙️ Configurazione
 /calibra NODE CANALE dry|wet|soglia VALORE
@@ -18,8 +17,7 @@ HELP_TEXT = """🌿 Comandi disponibili
 /plant NODE CANALE NOME [SPECIE] [POSIZIONE] [NOTE]
 
 Esempio:
-/pianta Basilico
-/storico plant-node-01 24h
+/storico Basilico 24h
 
 Per recuperare il tuo ID Telegram: /whoami"""
 
@@ -36,6 +34,7 @@ def main_keyboard(include_user_admin: bool = False) -> InlineKeyboardMarkup:
     ]
     if include_user_admin:
         buttons.append([InlineKeyboardButton("👥 Gestione utenti", callback_data="users:list")])
+        buttons.append([InlineKeyboardButton("🔔 Recap e notifiche", callback_data="admin:recap")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -45,6 +44,7 @@ def user_admin_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton("Add User", callback_data="users:add")],
             [InlineKeyboardButton("Remove User", callback_data="users:remove")],
             [InlineKeyboardButton("Users List", callback_data="users:list")],
+            [InlineKeyboardButton("🔔 Recap e notifiche", callback_data="admin:recap")],
             [InlineKeyboardButton("⬅️ Menu", callback_data="menu:home")],
         ]
     )

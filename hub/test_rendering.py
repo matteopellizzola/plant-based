@@ -50,11 +50,17 @@ class RenderingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "hub.sqlite3")
             store.save("node", "state", {"state": "online"})
+            store.save(
+                "node",
+                "measurements",
+                {"air": {"valid": True, "temperature_c": 22, "humidity_percent": 57}},
+            )
             text = node_status_text(store)
 
             self.assertIn("ID tecnico: node", text)
             self.assertIn("🌿 PIANTE", text)
             self.assertIn("🌡️ ARIA", text)
+            self.assertIn("Umidità aria: media 57.0%", text)
             self.assertIn("💡 LUCE", text)
 
 

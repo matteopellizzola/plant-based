@@ -120,6 +120,21 @@ class HubTests(unittest.TestCase):
 
             self.assertEqual(store.plant_alerts(), [])
 
+    def test_watering_records_history_and_explicitly_closes_low_moisture_warning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            store.set_plant("node", 0, "Basilico", threshold_percent=60)
+            store.save("node", "measurements", {"soil": [{"channel": 0, "moisture_percent": 59.9}]})
+
+            self.assertTrue(store.open_plant_warning("node", 0))
+            store.save("node", "measurements", {"soil": [{"channel": 0, "moisture_percent": 60.1}]})
+            self.assertIn("ancora aperto", store.plant_alerts()[0][-1])
+
+            watered_at = store.record_watering("node", 0, 42)
+            self.assertIsNone(store.plant_warning("node", 0))
+            self.assertEqual(store.last_watering("node", 0), watered_at)
+
     def test_store_updates_threshold_for_configured_plant(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "hub.sqlite3")
@@ -173,6 +188,51 @@ class HubTests(unittest.TestCase):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_ALLOWED_USER_IDS": "12, 34"}, clear=False):
             settings = Settings.from_environment()
             self.assertEqual(settings.allowed_user_ids, frozenset({12, 34}))
+
+    def test_settings_parses_recap_and_quiet_hours(self):
+        with patch.dict(os.environ, {
+            "TELEGRAM_BOT_TOKEN": "token",
+            "TELEGRAM_ALLOWED_USER_IDS": "12",
+            "TIMEZONE": "Europe/Rome",
+            "DAILY_RECAP_TIME": "08:15",
+            "QUIET_HOURS_START": "22:00",
+            "QUIET_HOURS_END": "07:30",
+        }, clear=False):
+            settings = Settings.from_environment()
+        self.assertEqual(settings.daily_recap_time.isoformat(), "08:15:00")
+        self.assertEqual(settings.quiet_hours_start.isoformat(), "22:00:00")
+        self.assertEqual(settings.quiet_hours_end.isoformat(), "07:30:00")
+
+    def test_settings_rejects_incomplete_quiet_hours(self):
+        with patch.dict(os.environ, {
+            "TELEGRAM_BOT_TOKEN": "token",
+            "TELEGRAM_ALLOWED_USER_IDS": "12",
+            "QUIET_HOURS_START": "22:00",
+            "QUIET_HOURS_END": "",
+        }, clear=False):
+            with self.assertRaisesRegex(ValueError, "QUIET_HOURS_START"):
+                Settings.from_environment()
+
+    def test_store_persists_notification_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            defaults = Settings(
+                mqtt_host="127.0.0.1", mqtt_port=1883, mqtt_username="", mqtt_password="",
+                topic_prefix="plants", telegram_token="token", allowed_user_ids=frozenset({42}),
+                database_path=Path(directory) / "hub.sqlite3",
+            )
+            configured = Settings(
+                **{**defaults.__dict__, "timezone_name": "UTC",
+                   "daily_recap_time": Settings.parse_clock("07:30", "ora"),
+                   "quiet_hours_start": Settings.parse_clock("22:00", "inizio"),
+                   "quiet_hours_end": Settings.parse_clock("07:00", "fine")}
+            )
+            store.save_notification_settings(configured)
+
+            restored = store.notification_settings(defaults)
+            self.assertEqual(restored.timezone_name, "UTC")
+            self.assertEqual(restored.daily_recap_time.isoformat(), "07:30:00")
+            self.assertEqual(restored.quiet_hours_start.isoformat(), "22:00:00")
 
     def test_store_manages_telegram_users(self):
         with tempfile.TemporaryDirectory() as directory:

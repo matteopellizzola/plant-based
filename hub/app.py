@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
@@ -28,6 +30,8 @@ NODE_NAME, PLANT_NODE, PLANT_CHANNEL, PLANT_NAME, PLANT_SPECIES, PLANT_POSITION,
 PLANT_RENAME_NAME, PLANT_RENAME_CONFIRM = range(13, 15)
 PLANT_MOVE_NODE, PLANT_MOVE_CHANNEL, PLANT_MOVE_CONFIRM = range(15, 18)
 USER_ID = 18
+PLANT_WATER_CONFIRM = 19
+RECAP_TIME, RECAP_TIMEZONE, QUIET_HOURS = range(20, 23)
 
 
 def is_admin(update: Update, settings: Settings) -> bool:
@@ -91,9 +95,120 @@ def build_user_management_handler() -> ConversationHandler:
     )
 
 
+def notification_settings_text(settings: Settings) -> str:
+    quiet = (
+        f"{settings.quiet_hours_start.isoformat(timespec='minutes')} – {settings.quiet_hours_end.isoformat(timespec='minutes')}"
+        if settings.quiet_hours_start and settings.quiet_hours_end else "disattivata"
+    )
+    return (
+        "🔔 Recap e notifiche\n\n"
+        f"Recap giornaliero: {settings.daily_recap_time.isoformat(timespec='minutes')}\n"
+        f"Fuso orario: {settings.timezone_name}\n"
+        f"Fascia silenziosa: {quiet}\n\n"
+        "Gli alert critici restano attivi anche nella fascia silenziosa."
+    )
+
+
+def notification_settings_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🕗 Cambia ora recap", callback_data="admin:recap:time")],
+        [InlineKeyboardButton("🌍 Cambia fuso orario", callback_data="admin:recap:timezone")],
+        [InlineKeyboardButton("🌙 Imposta fascia silenziosa", callback_data="admin:recap:quiet")],
+        [InlineKeyboardButton("☀️ Disattiva fascia silenziosa", callback_data="admin:recap:quiet-off")],
+        [InlineKeyboardButton("⬅️ Gestione utenti", callback_data="users:list")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
+    ])
+
+
+def reschedule_daily_recap(application: Application, settings: Settings) -> None:
+    previous_job = application.bot_data.get("daily_recap_job")
+    if previous_job is not None:
+        previous_job.schedule_removal()
+    job = application.job_queue.run_daily(
+        daily_recap_job,
+        time=settings.daily_recap_time.replace(tzinfo=ZoneInfo(settings.timezone_name)),
+        name="daily-recap",
+    )
+    application.bot_data["daily_recap_job"] = job
+
+
+def save_notification_settings(context: ContextTypes.DEFAULT_TYPE, settings: Settings) -> None:
+    store: Store = context.application.bot_data["store"]
+    store.save_notification_settings(settings)
+    context.application.bot_data["settings"] = settings
+    reschedule_daily_recap(context.application, settings)
+
+
+async def recap_settings_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    settings: Settings = context.application.bot_data["settings"]
+    if not is_admin(update, settings):
+        await query.answer("Accesso non autorizzato.", show_alert=True)
+        return ConversationHandler.END
+    actions = {"admin:recap:time": (RECAP_TIME, "Inserisci l'ora del recap nel formato HH:MM, per esempio 07:30."),
+               "admin:recap:timezone": (RECAP_TIMEZONE, "Inserisci un fuso IANA, per esempio Europe/Rome."),
+               "admin:recap:quiet": (QUIET_HOURS, "Inserisci la fascia silenziosa nel formato HH:MM-HH:MM, per esempio 22:00-07:00.")}
+    state, text = actions[query.data]
+    await query.answer()
+    await query.message.reply_text(text, reply_markup=cancel_keyboard())
+    return state
+
+
+async def recap_settings_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    settings: Settings = context.application.bot_data["settings"]
+    raw = update.effective_message.text.strip()
+    try:
+        if context.user_data.get("conversation_state") == RECAP_TIME:
+            updated = replace(settings, daily_recap_time=Settings.parse_clock(raw, "Ora"))
+        elif context.user_data.get("conversation_state") == RECAP_TIMEZONE:
+            ZoneInfo(raw)
+            updated = replace(settings, timezone_name=raw)
+        else:
+            start, end = (part.strip() for part in raw.split("-", 1))
+            updated = replace(settings, quiet_hours_start=Settings.parse_clock(start, "Inizio fascia"), quiet_hours_end=Settings.parse_clock(end, "Fine fascia"))
+    except (ValueError, IndexError, ZoneInfoNotFoundError):
+        await update.effective_message.reply_text("Valore non valido. Riprova oppure usa /annulla.", reply_markup=cancel_keyboard())
+        return context.user_data.get("conversation_state", RECAP_TIME)
+    save_notification_settings(context, updated)
+    context.user_data.pop("conversation_state", None)
+    await update.effective_message.reply_text("✅ Impostazioni salvate.\n\n" + notification_settings_text(updated), reply_markup=notification_settings_keyboard())
+    return ConversationHandler.END
+
+
+async def recap_settings_quiet_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    settings: Settings = context.application.bot_data["settings"]
+    if not is_admin(update, settings):
+        await query.answer("Accesso non autorizzato.", show_alert=True)
+        return
+    updated = replace(settings, quiet_hours_start=None, quiet_hours_end=None)
+    save_notification_settings(context, updated)
+    await query.answer()
+    await query.message.reply_text("✅ Fascia silenziosa disattivata.", reply_markup=notification_settings_keyboard())
+
+
+def build_recap_settings_handler() -> ConversationHandler:
+    async def start_and_remember(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        state = await recap_settings_start(update, context)
+        if state != ConversationHandler.END:
+            context.user_data["conversation_state"] = state
+        return state
+    return ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_and_remember, pattern=r"^admin:recap:(time|timezone|quiet)$")],
+        states={
+            RECAP_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, recap_settings_value)],
+            RECAP_TIMEZONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, recap_settings_value)],
+            QUIET_HOURS: [MessageHandler(filters.TEXT & ~filters.COMMAND, recap_settings_value)],
+        },
+        fallbacks=[CallbackQueryHandler(cancel_wizard, pattern=r"^wizard:cancel$"), CommandHandler(["annulla", "cancel"], cancel_wizard)],
+        conversation_timeout=900, per_user=True, per_chat=True,
+    )
+
+
 async def cancel_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.pop("wizard", None)
     context.user_data.pop("plant_action", None)
+    context.user_data.pop("conversation_state", None)
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.message.reply_text("Operazione annullata.", reply_markup=main_keyboard())
@@ -648,6 +763,45 @@ async def plant_move_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
+async def plant_watering_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    store: Store = context.application.bot_data["store"]
+    target = wizard_value(context, query.data.rsplit(":", 1)[-1])
+    plant = next((item for item in store.plants() if target == f"{item[0]}:{item[1]}"), None)
+    if plant is None:
+        await query.answer("Questa pianta non è più disponibile.", show_alert=True)
+        return ConversationHandler.END
+    context.user_data["plant_action"] = {"action": "water", "node": plant[0], "channel": plant[1], "name": plant[2]}
+    await query.answer()
+    await query.message.reply_text(
+        f"Confermi di aver annaffiato {plant[2]}?\nL'azione verrà registrata e chiuderà l'eventuale avviso aperto.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💧 Conferma annaffiatura", callback_data="plant-action:water-confirm")],
+            [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        ]),
+    )
+    return PLANT_WATER_CONFIRM
+
+
+async def plant_watering_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    action = context.user_data.get("plant_action", {})
+    store: Store = context.application.bot_data["store"]
+    if action.get("action") != "water" or store.channel_plant(action.get("node", ""), action.get("channel", -1)) is None:
+        await query.answer("Questa pianta non è più disponibile.", show_alert=True)
+        return ConversationHandler.END
+    user_id = update.effective_user.id if update.effective_user else None
+    watered_at = store.record_watering(action["node"], action["channel"], user_id)
+    await query.answer()
+    await query.message.reply_text(
+        f"💧 Annaffiatura registrata per {action['name']} alle {format_local_time(watered_at)}."
+        " L'eventuale avviso di umidità bassa è stato chiuso.",
+        reply_markup=main_keyboard(),
+    )
+    context.user_data.pop("plant_action", None)
+    return ConversationHandler.END
+
+
 def build_wizard_handler() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[
@@ -680,7 +834,7 @@ def build_wizard_handler() -> ConversationHandler:
         fallbacks=[
             CallbackQueryHandler(cancel_wizard, pattern=r"^wizard:cancel$"),
             CallbackQueryHandler(cancel_wizard, pattern=r"^menu:home$"),
-            CommandHandler(["annulla", "cancel", "start", "help", "piante", "stato", "status", "storico", "cal", "calibra", "node", "plant"], cancel_wizard),
+            CommandHandler(["annulla", "cancel", "start", "help", "storico", "cal", "calibra", "node", "plant"], cancel_wizard),
         ],
         conversation_timeout=900,
         per_user=True,
@@ -693,7 +847,8 @@ def build_plant_action_handler() -> ConversationHandler:
         entry_points=[
             CallbackQueryHandler(plant_rename_start, pattern=r"^plant-action:rename:"),
             CallbackQueryHandler(plant_edit_start, pattern=r"^plant-action:edit:"),
-            CallbackQueryHandler(plant_move_start, pattern=r"^plant-action:move:")
+            CallbackQueryHandler(plant_move_start, pattern=r"^plant-action:move:"),
+            CallbackQueryHandler(plant_watering_start, pattern=r"^plant-action:water:"),
         ],
         states={
             PLANT_RENAME_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, plant_rename_name)],
@@ -706,6 +861,7 @@ def build_plant_action_handler() -> ConversationHandler:
             PLANT_MOVE_NODE: [CallbackQueryHandler(plant_move_node, pattern=r"^plant-action:move-node:")],
             PLANT_MOVE_CHANNEL: [CallbackQueryHandler(plant_move_channel, pattern=r"^plant-action:move-channel:")],
             PLANT_MOVE_CONFIRM: [CallbackQueryHandler(plant_move_confirm, pattern=r"^plant-action:move-confirm$")],
+            PLANT_WATER_CONFIRM: [CallbackQueryHandler(plant_watering_confirm, pattern=r"^plant-action:water-confirm$")],
         },
         fallbacks=[
             CallbackQueryHandler(cancel_wizard, pattern=r"^wizard:cancel$"),
@@ -787,6 +943,15 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         keyboard = [[InlineKeyboardButton(str(user_id), callback_data=f"users:remove:{user_id}")] for user_id in managed_ids]
         keyboard.append([InlineKeyboardButton("⬅️ Gestione utenti", callback_data="users:list")])
         await query.message.reply_text("Scegli l'utente da rimuovere:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+    if query.data == "admin:recap":
+        if not is_admin(update, settings):
+            await query.answer("Accesso non autorizzato.", show_alert=True)
+            return
+        await query.message.reply_text(notification_settings_text(settings), reply_markup=notification_settings_keyboard())
+        return
+    if query.data == "admin:recap:quiet-off":
+        await recap_settings_quiet_off(update, context)
         return
     if query.data and query.data.startswith("users:remove:"):
         if not is_admin(update, settings):
@@ -924,8 +1089,17 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if notes:
             text += f"Note: {notes}\n"
         text += f"Umidità terreno: {moisture:.1f}%" if isinstance(moisture, (int, float)) else "Umidità terreno: dato non disponibile"
+        air = payload.get("air", {})
+        if isinstance(air, dict) and air.get("valid"):
+            text += f"\nAria: {air.get('temperature_c', '?')} °C · {air.get('humidity_percent', '?')}% umidità"
+        light = payload.get("light", {})
+        if isinstance(light, dict) and light.get("valid") and isinstance(light.get("lux"), (int, float)):
+            text += f"\nLuce: {light['lux']:.1f} lux"
         if threshold is not None:
             text += f"\nSoglia: {threshold:.0f}%"
+        last_watering = store.last_watering(node, channel)
+        if last_watering:
+            text += f"\nUltima annaffiatura registrata: {format_local_time(last_watering)}"
         history_token = wizard_token(context, f"{node}:{channel}")
         plant_token = wizard_token(context, f"{node}:{channel}")
         keyboard = [
@@ -937,6 +1111,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 InlineKeyboardButton("Rinomina", callback_data=f"plant-action:rename:{plant_token}"),
                 InlineKeyboardButton("Modifica", callback_data=f"plant-action:edit:{plant_token}"),
             ],
+            [InlineKeyboardButton("💧 Segna come annaffiata", callback_data=f"plant-action:water:{plant_token}")],
             [
                 InlineKeyboardButton("Sposta canale", callback_data=f"plant-action:move:{plant_token}"),
                 InlineKeyboardButton("Elimina pianta", callback_data=f"plant-action:delete:{plant_token}"),
@@ -1140,8 +1315,14 @@ def node_status_text(store: Store, selected_node: str | None = None) -> str:
                 f"Temperatura: media {air['average']:.1f} °C, "
                 f"min {air['minimum']:.1f} °C, max {air['maximum']:.1f} °C"
             )
+            lines.append(
+                f"Umidità aria: media {air['humidity_average']:.1f}%"
+                if air["humidity_average"] is not None
+                else "Umidità aria: n/d"
+            )
         else:
             lines.append("Temperatura: n/d")
+            lines.append("Umidità aria: n/d")
         lines.append("\n💡 LUCE")
         if light["count"]:
             lines.append(
@@ -1165,6 +1346,48 @@ def plant_alerts_text(store: Store) -> str:
     return "\n".join(lines)
 
 
+def format_local_time(value: str) -> str:
+    """Render a stored UTC timestamp in the hub's local timezone."""
+    return datetime.fromisoformat(value).astimezone().strftime("%d/%m/%Y %H:%M")
+
+
+def is_quiet_hours(settings: Settings, now: datetime | None = None) -> bool:
+    """Return whether local time is inside the configured, possibly overnight, quiet window."""
+    if settings.quiet_hours_start is None or settings.quiet_hours_end is None:
+        return False
+    current = (now or datetime.now(ZoneInfo(settings.timezone_name))).astimezone(ZoneInfo(settings.timezone_name)).time()
+    start, end = settings.quiet_hours_start, settings.quiet_hours_end
+    if start == end:
+        return True
+    if start < end:
+        return start <= current < end
+    return current >= start or current < end
+
+
+def daily_recap_text(store: Store, settings: Settings) -> str:
+    now = datetime.now(ZoneInfo(settings.timezone_name))
+    lines = [f"☀️ Recap giornaliero · {now.strftime('%d/%m/%Y')}", ""]
+    alerts = plant_alerts_text(store)
+    lines.extend([alerts, "", node_status_text(store)])
+    text = "\n".join(lines)
+    return text if len(text) <= 4096 else text[:4080] + "\n\n… recap abbreviato. Apri Stato nodi per i dettagli."
+
+
+async def daily_recap_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings: Settings = context.application.bot_data["settings"]
+    if is_quiet_hours(settings):
+        LOGGER.info("Recap giornaliero non inviato: fascia silenziosa attiva")
+        return
+    store: Store = context.application.bot_data["store"]
+    text = daily_recap_text(store, settings)
+    recipients = set(settings.allowed_user_ids) | set(store.telegram_users())
+    for user_id in recipients:
+        try:
+            await context.application.bot.send_message(chat_id=user_id, text=text)
+        except Exception:
+            LOGGER.exception("Invio recap Telegram fallito per user_id=%s", user_id)
+
+
 async def alert_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.application.bot_data["settings"]
     store: Store = context.application.bot_data["store"]
@@ -1177,12 +1400,25 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         expected.add(missing_key)
         messages[missing_key] = f"ℹ️ {name}: umidità del terreno non disponibile (A{channel}, {store.node_name(node)})."
         if threshold is not None:
-            low_key = f"soil-low:{node}:{channel}"
-            expected.add(low_key)
-            messages[low_key] = f"🔴 {name}: umidità del terreno sotto soglia (A{channel}, {store.node_name(node)})."
+            payload = store.latest_measurements(node) or {}
+            soil = payload.get("soil", [])
+            reading = next((item for item in soil if isinstance(item, dict) and item.get("channel") == channel), None) if isinstance(soil, list) else None
+            moisture = reading.get("moisture_percent") if reading else None
+            if isinstance(moisture, (int, float)) and 0 <= moisture <= 100 and moisture < threshold:
+                if store.open_plant_warning(node, channel):
+                    key = f"soil-low:{node}:{channel}"
+                    expected.add(key)
+                    messages[key] = (
+                        f"🔴 {name}: umidità del terreno sotto soglia (A{channel}, {store.node_name(node)}). "
+                        f"Lettura: {moisture:.1f}% (soglia {threshold:.0f}%). "
+                        "L'avviso resterà aperto finché non registri l'annaffiatura."
+                    )
+                    current[key] = messages[key]
 
     for kind, name, node, channel, detail in store.plant_alerts():
-        key = f"soil-{'low' if kind == 'alert' else 'missing'}:{node}:{channel}"
+        key = f"soil-missing:{node}:{channel}"
+        if kind == "alert":
+            continue
         current[key] = f"{messages[key]} Lettura: {detail}."
 
     for node, name, reason in store.offline_node_alerts(settings.node_offline_after_seconds):
@@ -1193,6 +1429,10 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     recipients = set(settings.allowed_user_ids) | set(store.telegram_users())
     for key in expected:
+        # Gli avvisi informativi vengono consegnati al termine della fascia silenziosa;
+        # gli alert critici restano immediati.
+        if key.startswith("soil-missing:") and is_quiet_hours(settings):
+            continue
         changed, previous = store.update_alert_state(key, key in current)
         if not changed or (key not in current and previous is not True):
             continue
@@ -1212,13 +1452,11 @@ async def configure_command_menu(application: Application) -> None:
         [
             BotCommand("start", "apri il menu del bot"),
             BotCommand("help", "mostra cosa posso fare"),
-            BotCommand("piante", "elenca le tue piante"),
-            BotCommand("pianta", "mostra il dettaglio di una pianta"),
             BotCommand("rinomina", "cambia nome a una pianta"),
-            BotCommand("stato", "controlla i nodi"),
-            BotCommand("status", "controlla i nodi"),
             BotCommand("storico", "mostra l'andamento recente"),
             BotCommand("avvisi", "mostra alert e dati non disponibili"),
+            BotCommand("annaffia", "registra un'annaffiatura"),
+            BotCommand("recap", "mostra il recap giornaliero"),
             BotCommand("calibra", "imposta una calibrazione"),
             BotCommand("cal", "imposta una calibrazione"),
             BotCommand("node", "imposta il nome di un nodo"),
@@ -1226,29 +1464,6 @@ async def configure_command_menu(application: Application) -> None:
             BotCommand("whoami", "mostra il tuo ID Telegram"),
         ]
     )
-
-
-async def plants(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await deny_unless_allowed(update, context):
-        return
-    store: Store = context.application.bot_data["store"]
-    configured_plants = store.plants()
-    if not configured_plants:
-        await update.effective_message.reply_text(
-            "Non hai ancora configurato nessuna pianta.\n"
-            "Per iniziare usa /plant NODE CANALE NOME."
-        )
-        return
-    lines = ["🌱 Le tue piante"]
-    current_node = None
-    for node, channel, name, species, position, _, _ in configured_plants:
-        if node != current_node:
-            current_node = node
-            lines.append(f"\n📍 {store.node_name(node)}")
-        details = ", ".join(value for value in (species, position) if value)
-        suffix = f" · {details}" if details else ""
-        lines.append(f"  └ {name} · canale A{channel}{suffix}")
-    await update.effective_message.reply_text("\n".join(lines))
 
 
 async def rename_plant(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1273,7 +1488,7 @@ async def rename_plant(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     matches = store.find_plants(current_name)
     if not matches:
         await update.effective_message.reply_text(
-            f"Non trovo la pianta {current_name}. Usa /piante per vedere l'alberatura completa."
+            f"Non trovo la pianta {current_name}. Apri “Le mie piante” dal menu per vedere l'elenco completo."
         )
         return
     if len(matches) > 1:
@@ -1290,72 +1505,39 @@ async def rename_plant(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.effective_message.reply_text(f"✅ Pianta rinominata: {current_name} → {new_name}")
 
 
-async def plant_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await deny_unless_allowed(update, context):
-        return
-    if not context.args:
-        await update.effective_message.reply_text("Scrivi il nome della pianta. Esempio: /pianta Basilico")
-        return
-    query = " ".join(context.args)
-    store: Store = context.application.bot_data["store"]
-    matches = store.find_plants(query)
-    if not matches:
-        await update.effective_message.reply_text(
-            f"Non trovo una pianta chiamata {query}. Usa /piante per vedere i nomi disponibili."
-        )
-        return
-    if len(matches) > 1:
-        await update.effective_message.reply_text(
-            "Ho trovato più piante con questo nome. Rinominale con /plant per distinguerle."
-        )
-        return
-    node, channel, name, species, position, notes, threshold = matches[0]
-    payload = store.latest_measurements(node) or {}
-    soil_value = None
-    for item in payload.get("soil", []):
-        if isinstance(item, dict) and item.get("channel") == channel:
-            soil_value = item.get("moisture_percent")
-            break
-    air = payload.get("air", {})
-    lines = [f"🌿 {name}", f"Posizione: {position or 'non indicata'}"]
-    if species:
-        lines.append(f"Specie: {species}")
-    if notes:
-        lines.append(f"Note: {notes}")
-    lines.append(f"Nodo: {store.node_name(node)}")
-    lines.append(f"Umidità terreno: {soil_value:.1f}%" if isinstance(soil_value, (int, float)) else "Umidità terreno: dato non disponibile")
-    if isinstance(air, dict) and air.get("valid"):
-        lines.append(f"Aria: {air.get('temperature_c', '?')} °C · {air.get('humidity_percent', '?')}% umidità")
-    light = payload.get("light", {})
-    if isinstance(light, dict) and light.get("valid") and isinstance(light.get("lux"), (int, float)):
-        lines.append(f"Luce: {light['lux']:.1f} lux")
-    if threshold is not None:
-        lines.append(f"Soglia configurata: {threshold:.0f}%")
-    await update.effective_message.reply_text("\n".join(lines))
-
-
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await deny_unless_allowed(update, context):
-        return
-    store: Store = context.application.bot_data["store"]
-    rows = store.latest()
-    if not rows:
-        text = "Nessuna misura ricevuta."
-    else:
-        lines = []
-        for node, kind, payload, received_at in rows:
-            state = payload.get("state", "")
-            detail = f" stato={state}" if state else ""
-            lines.append(f"{store.node_name(node)} [{node}]: {kind}{detail} ({received_at})")
-        text = "\n".join(lines)
-    await update.effective_message.reply_text(text)
-
-
 async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await deny_unless_allowed(update, context):
         return
     store: Store = context.application.bot_data["store"]
     await update.effective_message.reply_text(plant_alerts_text(store), reply_markup=main_keyboard())
+
+
+async def recap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await deny_unless_allowed(update, context):
+        return
+    settings: Settings = context.application.bot_data["settings"]
+    store: Store = context.application.bot_data["store"]
+    await update.effective_message.reply_text(daily_recap_text(store, settings), reply_markup=main_keyboard())
+
+
+async def water_plant(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await deny_unless_allowed(update, context):
+        return
+    name = " ".join(context.args).strip()
+    if not name:
+        await update.effective_message.reply_text("Uso: /annaffia NOME_PIANTA")
+        return
+    store: Store = context.application.bot_data["store"]
+    matches = store.find_plants(name)
+    if len(matches) != 1:
+        await update.effective_message.reply_text("Non trovo una sola pianta con questo nome. Apri “Le mie piante” per selezionarla.")
+        return
+    node, channel, plant_name, *_ = matches[0]
+    user_id = update.effective_user.id if update.effective_user else None
+    watered_at = store.record_watering(node, channel, user_id)
+    await update.effective_message.reply_text(
+        f"💧 Annaffiatura registrata per {plant_name} alle {format_local_time(watered_at)}. L'eventuale avviso è stato chiuso."
+    )
 
 
 async def set_node_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1487,6 +1669,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = Settings.from_environment()
     store = Store(settings.database_path)
+    settings = store.notification_settings(settings)
     mqtt_client = build_mqtt_client(settings, store)
     mqtt_client.loop_start()
     application = Application.builder().token(settings.telegram_token).post_init(configure_command_menu).build()
@@ -1500,21 +1683,22 @@ def main() -> None:
         name="plant-alerts",
     )
     application.add_handler(build_user_management_handler())
+    application.add_handler(build_recap_settings_handler())
     application.add_handler(build_wizard_handler())
     application.add_handler(build_plant_action_handler())
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler(["status", "stato"], status))
     application.add_handler(CommandHandler("avvisi", alerts))
-    application.add_handler(CommandHandler("piante", plants))
-    application.add_handler(CommandHandler("pianta", plant_detail))
+    application.add_handler(CommandHandler("recap", recap))
+    application.add_handler(CommandHandler("annaffia", water_plant))
     application.add_handler(CommandHandler("rinomina", rename_plant))
     application.add_handler(CommandHandler(["cal", "calibra"], set_calibration))
     application.add_handler(CommandHandler("node", set_node_name))
     application.add_handler(CommandHandler("plant", set_plant))
     application.add_handler(CommandHandler("storico", history))
     application.add_handler(CallbackQueryHandler(button_click))
+    reschedule_daily_recap(application, settings)
     LOGGER.info("Hub avviato; utenti autorizzati: %d", len(settings.allowed_user_ids))
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 

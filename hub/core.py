@@ -6,10 +6,11 @@ import json
 import os
 import sqlite3
 import threading
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 MAX_NODE_NAME_LENGTH = 64
@@ -29,6 +30,10 @@ class Settings:
     database_path: Path
     alert_check_interval_seconds: int = 60
     node_offline_after_seconds: int = 300
+    timezone_name: str = "Europe/Rome"
+    daily_recap_time: time = time(8, 0)
+    quiet_hours_start: time | None = None
+    quiet_hours_end: time | None = None
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -39,6 +44,16 @@ class Settings:
             raise ValueError("TELEGRAM_BOT_TOKEN non configurato")
         if not allowed_ids:
             raise ValueError("TELEGRAM_ALLOWED_USER_IDS deve contenere almeno un ID")
+        timezone_name = os.getenv("TIMEZONE", "Europe/Rome").strip()
+        try:
+            ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("TIMEZONE deve essere un fuso orario IANA valido, per esempio Europe/Rome") from error
+        daily_recap_time = cls.parse_clock(os.getenv("DAILY_RECAP_TIME", "08:00"), "DAILY_RECAP_TIME")
+        quiet_start_raw = os.getenv("QUIET_HOURS_START", "").strip()
+        quiet_end_raw = os.getenv("QUIET_HOURS_END", "").strip()
+        if bool(quiet_start_raw) != bool(quiet_end_raw):
+            raise ValueError("QUIET_HOURS_START e QUIET_HOURS_END devono essere entrambi configurati oppure entrambi vuoti")
         return cls(
             mqtt_host=os.getenv("MQTT_HOST", "127.0.0.1"),
             mqtt_port=int(os.getenv("MQTT_PORT", "1883")),
@@ -50,7 +65,18 @@ class Settings:
             database_path=Path(os.getenv("DATABASE_PATH", "hub/data/plant_hub.sqlite3")),
             alert_check_interval_seconds=max(15, int(os.getenv("ALERT_CHECK_INTERVAL_SECONDS", "60"))),
             node_offline_after_seconds=max(60, int(os.getenv("NODE_OFFLINE_AFTER_SECONDS", "300"))),
+            timezone_name=timezone_name,
+            daily_recap_time=daily_recap_time,
+            quiet_hours_start=cls.parse_clock(quiet_start_raw, "QUIET_HOURS_START") if quiet_start_raw else None,
+            quiet_hours_end=cls.parse_clock(quiet_end_raw, "QUIET_HOURS_END") if quiet_end_raw else None,
         )
+
+    @staticmethod
+    def parse_clock(value: str, variable: str) -> time:
+        try:
+            return time.fromisoformat(value.strip())
+        except ValueError as error:
+            raise ValueError(f"{variable} deve usare il formato HH:MM, per esempio 22:30") from error
 
 
 def utc_now() -> str:
@@ -123,6 +149,34 @@ class Store:
                 updated_at TEXT NOT NULL
             )"""
         )
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS app_preferences (
+                preference_key TEXT PRIMARY KEY,
+                preference_value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"""
+        )
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS plant_warnings (
+                node TEXT NOT NULL,
+                channel INTEGER NOT NULL CHECK(channel BETWEEN 0 AND 3),
+                raised_at TEXT NOT NULL,
+                PRIMARY KEY (node, channel)
+            )"""
+        )
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS plant_watering_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node TEXT NOT NULL,
+                channel INTEGER NOT NULL CHECK(channel BETWEEN 0 AND 3),
+                watered_at TEXT NOT NULL,
+                recorded_by INTEGER
+            )"""
+        )
+        self.connection.execute(
+            """CREATE INDEX IF NOT EXISTS idx_plant_watering_history_plant_time
+               ON plant_watering_history(node, channel, watered_at DESC)"""
+        )
         self.connection.commit()
 
     def save(self, node: str, kind: str, payload: dict[str, Any]) -> None:
@@ -140,6 +194,43 @@ class Store:
                     "INSERT INTO measurement_history(node, payload, received_at) VALUES (?, ?, ?)",
                     (node, json.dumps(payload, ensure_ascii=True), received_at),
                 )
+            self.connection.commit()
+
+    def notification_settings(self, defaults: Settings) -> Settings:
+        """Load notification preferences saved by an administrator, with env defaults."""
+        with self.lock:
+            rows = self.connection.execute(
+                "SELECT preference_key, preference_value FROM app_preferences"
+            ).fetchall()
+        values = dict(rows)
+        try:
+            timezone_name = values.get("timezone_name", defaults.timezone_name)
+            ZoneInfo(timezone_name)
+            recap_time = Settings.parse_clock(values.get("daily_recap_time", defaults.daily_recap_time.isoformat()), "daily_recap_time")
+            quiet_start_value = values.get("quiet_hours_start", "")
+            quiet_end_value = values.get("quiet_hours_end", "")
+            if bool(quiet_start_value) != bool(quiet_end_value):
+                raise ValueError("fascia silenziosa incompleta")
+            quiet_start = Settings.parse_clock(quiet_start_value, "quiet_hours_start") if quiet_start_value else None
+            quiet_end = Settings.parse_clock(quiet_end_value, "quiet_hours_end") if quiet_end_value else None
+            return replace(defaults, timezone_name=timezone_name, daily_recap_time=recap_time,
+                           quiet_hours_start=quiet_start, quiet_hours_end=quiet_end)
+        except (ValueError, ZoneInfoNotFoundError):
+            return defaults
+
+    def save_notification_settings(self, settings: Settings) -> None:
+        values = {
+            "timezone_name": settings.timezone_name,
+            "daily_recap_time": settings.daily_recap_time.isoformat(timespec="minutes"),
+            "quiet_hours_start": settings.quiet_hours_start.isoformat(timespec="minutes") if settings.quiet_hours_start else "",
+            "quiet_hours_end": settings.quiet_hours_end.isoformat(timespec="minutes") if settings.quiet_hours_end else "",
+        }
+        with self.lock:
+            self.connection.executemany(
+                """INSERT INTO app_preferences(preference_key, preference_value, updated_at) VALUES (?, ?, ?)
+                   ON CONFLICT(preference_key) DO UPDATE SET preference_value=excluded.preference_value, updated_at=excluded.updated_at""",
+                [(key, value, utc_now()) for key, value in values.items()],
+            )
             self.connection.commit()
 
     def latest(self, node: str | None = None) -> list[tuple[str, str, dict[str, Any], str]]:
@@ -330,6 +421,9 @@ class Store:
                 "DELETE FROM plant_metadata WHERE node = ? AND channel = ?",
                 (node, channel),
             )
+            self.connection.execute("DELETE FROM plant_warnings WHERE node = ? AND channel = ?", (node, channel))
+            self.connection.execute("DELETE FROM plant_watering_history WHERE node = ? AND channel = ?", (node, channel))
+            self.connection.execute("DELETE FROM alert_states WHERE alert_key = ?", (f"soil-low:{node}:{channel}",))
             self.connection.commit()
         return cursor.rowcount == 1
 
@@ -356,6 +450,9 @@ class Store:
                     (node,),
                 )
                 results["configuration"] = config_cursor.rowcount > 0 or metadata_cursor.rowcount > 0
+                self.connection.execute("DELETE FROM plant_warnings WHERE node = ?", (node,))
+                self.connection.execute("DELETE FROM plant_watering_history WHERE node = ?", (node,))
+                self.connection.execute("DELETE FROM alert_states WHERE alert_key LIKE ?", (f"soil-low:{node}:%",))
             if clear_last_state:
                 state_cursor = self.connection.execute(
                     "DELETE FROM node_messages WHERE node = ? AND kind = 'state'",
@@ -397,6 +494,14 @@ class Store:
             )
             if (node, channel) != (target_node, target_channel):
                 self.connection.execute(
+                    "UPDATE plant_warnings SET node = ?, channel = ? WHERE node = ? AND channel = ?",
+                    (target_node, target_channel, node, channel),
+                )
+                self.connection.execute(
+                    "UPDATE plant_watering_history SET node = ?, channel = ? WHERE node = ? AND channel = ?",
+                    (target_node, target_channel, node, channel),
+                )
+                self.connection.execute(
                     "DELETE FROM plant_metadata WHERE node = ? AND channel = ?",
                     (node, channel),
                 )
@@ -409,7 +514,7 @@ class Store:
         return None
 
     def plant_alerts(self) -> list[tuple[str, str, str, int, str]]:
-        """Return current plant alerts and informational messages."""
+        """Return current and explicitly unacknowledged plant alerts."""
         alerts: list[tuple[str, str, str, int, str]] = []
         for node, channel, name, _, _, _, threshold in self.plants():
             payload = self.latest_measurements(node) or {}
@@ -421,9 +526,57 @@ class Store:
             moisture = reading.get("moisture_percent") if reading else None
             if not isinstance(moisture, (int, float)) or not 0 <= moisture <= 100:
                 alerts.append(("info", name, node, channel, "umidità del terreno non disponibile"))
+                if threshold is not None and self.plant_warning(node, channel) is not None:
+                    alerts.append(("alert", name, node, channel,
+                        f"avviso di umidità bassa ancora aperto; ultima lettura non disponibile (soglia {threshold:.0f}%)"))
+            elif threshold is not None and self.plant_warning(node, channel) is not None:
+                alerts.append(("alert", name, node, channel,
+                    f"avviso di umidità bassa ancora aperto; ultima lettura {moisture:.1f}% (soglia {threshold:.0f}%)"))
             elif threshold is not None and moisture < threshold:
                 alerts.append(("alert", name, node, channel, f"umidità del terreno {moisture:.1f}% (soglia {threshold:.0f}%)"))
         return alerts
+
+    def plant_warning(self, node: str, channel: int) -> str | None:
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT raised_at FROM plant_warnings WHERE node = ? AND channel = ?", (node, channel)
+            ).fetchone()
+        return row[0] if row else None
+
+    def open_plant_warning(self, node: str, channel: int) -> bool:
+        """Open a low-moisture warning once; it remains until watering is recorded."""
+        if self.channel_plant(node, channel) is None:
+            raise ValueError("Pianta non configurata per il canale indicato")
+        with self.lock:
+            cursor = self.connection.execute(
+                "INSERT OR IGNORE INTO plant_warnings(node, channel, raised_at) VALUES (?, ?, ?)",
+                (node, channel, utc_now()),
+            )
+            self.connection.commit()
+        return cursor.rowcount == 1
+
+    def record_watering(self, node: str, channel: int, recorded_by: int | None = None) -> str:
+        """Record an explicit watering and acknowledge the outstanding warning."""
+        if self.channel_plant(node, channel) is None:
+            raise ValueError("Pianta non configurata per il canale indicato")
+        watered_at = utc_now()
+        with self.lock:
+            self.connection.execute(
+                "INSERT INTO plant_watering_history(node, channel, watered_at, recorded_by) VALUES (?, ?, ?, ?)",
+                (node, channel, watered_at, recorded_by),
+            )
+            self.connection.execute("DELETE FROM plant_warnings WHERE node = ? AND channel = ?", (node, channel))
+            self.connection.execute("DELETE FROM alert_states WHERE alert_key = ?", (f"soil-low:{node}:{channel}",))
+            self.connection.commit()
+        return watered_at
+
+    def last_watering(self, node: str, channel: int) -> str | None:
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT watered_at FROM plant_watering_history WHERE node = ? AND channel = ? ORDER BY id DESC LIMIT 1",
+                (node, channel),
+            ).fetchone()
+        return row[0] if row else None
 
     def offline_node_alerts(self, after_seconds: int) -> list[tuple[str, str, str]]:
         now = datetime.now(timezone.utc)

@@ -388,8 +388,8 @@ indirizzo in `include/secrets.h` prima di caricare il firmware.
 - [ ] Configurare durata minima tra due avvisi e fascia oraria di notifica
 - [ ] Esporre riepiloghi giornalieri completi con andamento persistente
       dell'esposizione luminosa
-- [ ] Registrare l'evento di irrigazione (manuale o automatico), quantita' o
-      durata e note, per confrontare l'azione con la risposta del terreno
+- [x] Registrare l'evento di irrigazione manuale e usare la conferma per
+      chiudere l'avviso di terreno basso del vaso interessato
 
 ### Fase 5 — Avvisi e supervisione semiautomatica
 
@@ -399,15 +399,14 @@ indirizzo in `include/secrets.h` prima di caricare il firmware.
 - [ ] Eseguire automaticamente il controllo degli alert tramite un job `cron`
       o scheduler persistente sul Raspberry, senza dipendere da un comando
       Telegram manuale
-- [ ] Usare isteresi, cooldown e deduplicazione: un warning non va ripetuto a
-      ogni misura e si deve inviare un messaggio di rientro quando il valore
-      torna sopra la soglia
+- [x] Mantenere un warning di umidità aperto e non ripeterlo durante oscillazioni
+      attorno alla soglia; lo chiude solo la conferma di annaffiatura
 - [ ] Non notificare durante un'interruzione del nodo o con letture stale;
       inviare invece un avviso distinto per nodo offline o sensore guasto
 - [ ] Aggiungere una coda di notifiche persistente e riprovare gli invii
       Telegram falliti senza perdere gli alert
-- [ ] Consentire di marcare un alert come `visto`, `irrigato` o `rimandato`,
-      mantenendo lo stato nel database
+- [x] Consentire di marcare un alert come `irrigato`, mantenendo stato e storico
+      nel database
 - [ ] Proporre `/irrigare NOME` come richiesta di azione con conferma esplicita,
       senza attivare pompe finche' l'utente non conferma
 
@@ -415,8 +414,8 @@ indirizzo in `include/secrets.h` prima di caricare il firmware.
 
 - [x] Pubblicare una mappa completa dei comandi con `/help` e descrizioni in
       linguaggio naturale, senza richiedere conoscenza di nodi, topic o canali
-- [x] Implementare il primo gruppo consultivo: `/start`, `/help`, `/piante`,
-      `/pianta NOME`, `/stato`/`/status`, `/storico`, `/rinomina` e `/whoami`
+- [x] Implementare il primo gruppo consultivo: `/start`, `/help`, `/storico`,
+      `/rinomina` e `/whoami`, con elenco piante e stato nodi tramite pulsanti
 - [ ] Implementare `/problemi`, `/impostazioni`, `/annulla` e la gestione
       guidata di comandi incompleti o piante inesistenti
 - [ ] Implementare `/irrigare NOME`, `/conferma` e `/rimanda` solo quando la
@@ -441,13 +440,12 @@ indirizzo in `include/secrets.h` prima di caricare il firmware.
       sensore non configurato e lettura anomala
 - [ ] Separare i permessi: consultazione per tutti gli utenti autorizzati,
       modifica impostazioni e irrigazione soltanto per gli amministratori
-- [ ] Configurare orari silenziosi, preferenze per pianta e riepilogo quotidiano
-      senza nascondere gli alert critici
-- [ ] Inviare automaticamente ogni mattina alle 08:00 un recap Telegram con
-      stato dei nodi, vasi sotto soglia, nodi offline, ultime letture e azioni
-      consigliate
-- [ ] Rendere configurabili ora e fuso orario del recap, evitando invii doppi
-      dopo riavvii o cambi d'ora legale
+- [x] Configurare orari silenziosi globali e riepilogo quotidiano senza
+      nascondere gli alert critici
+- [x] Inviare automaticamente un recap Telegram giornaliero con stato dei nodi,
+      vasi sotto soglia e ultime letture disponibili
+- [x] Rendere configurabili ora e fuso orario del recap; il job giornaliero usa
+      il fuso IANA configurato, inclusi i cambi d'ora legale
 
 ### Fase 7 — Dal primo nodo ai quattro nodi
 

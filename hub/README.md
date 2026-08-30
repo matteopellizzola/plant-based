@@ -65,12 +65,8 @@ Comandi disponibili agli utenti autorizzati:
 ```text
 /start
 /help
-/piante
-/pianta Basilico
 /rinomina Basilico | Basilico cucina
-/stato
 /storico Basilico 24h
-/status
 /avvisi
 /cal plant-node-01 0 dry 2.700
 /cal plant-node-01 0 wet 1.250
@@ -81,15 +77,15 @@ Comandi disponibili agli utenti autorizzati:
 /storico plant-node-01 7g
 ```
 
-I comandi in italiano sono pensati per l'uso quotidiano: `/stato` è l'alias
-di `/status`, `/calibra` è l'alias di `/cal`, e `/storico` accetta il nome
+I comandi in italiano sono pensati per l'uso quotidiano: `/calibra` è l'alias
+di `/cal`, e `/storico` accetta il nome
 della pianta quando è composto da una sola parola (`/storico Basilico 24h`),
 oltre all'ID tecnico del nodo. `/start`
 e `/help` mostrano solo le funzioni già disponibili; non vengono ancora
 pubblicizzati irrigazione, problemi o notifiche automatiche.
 
-`/piante` mostra l'alberatura completa raggruppando ogni vaso sotto il proprio
-nodo. Per cambiare il nome di una pianta usa il separatore `|`, che permette di
+Il pulsante `Le mie piante` mostra l'alberatura completa raggruppando ogni vaso
+sotto il proprio nodo. Per cambiare il nome di una pianta usa il separatore `|`, che permette di
 conservare gli spazi nel nome: `/rinomina Basilico | Basilico cucina`. Il nome
 nuovo deve essere unico; gli altri dati della pianta restano invariati.
 
@@ -104,14 +100,28 @@ mostrata solo quando il payload del BH1750 e' valido; durata e andamento
 giornaliero sono ancora da implementare.
 
 `/avvisi` mostra gli alert per umidità del terreno sotto soglia e segnala i dati
-non disponibili. Gli stessi alert vengono inviati automaticamente via Telegram
-agli utenti autorizzati: il controllo avviene ogni 60 secondi e un messaggio
-viene inviato solo quando una condizione entra in allarme o rientra. Un nodo è
+non disponibili. Un alert di terreno basso resta aperto anche se le letture
+successive tornano temporaneamente sopra soglia: viene chiuso soltanto quando
+l'utente registra l'annaffiatura del vaso, dal pulsante nel dettaglio della
+pianta o con `/annaffia NOME`. Ogni conferma viene conservata nello storico
+SQLite, con data, ora e ID Telegram di chi l'ha registrata. Gli stessi alert
+vengono inviati automaticamente via Telegram agli utenti autorizzati: il
+controllo avviene ogni 60 secondi e un messaggio viene inviato solo quando una
+condizione entra in allarme. Un nodo è
 considerato offline dopo 5 minuti senza messaggi; entrambi i valori sono
 configurabili in `hub/.env` con `ALERT_CHECK_INTERVAL_SECONDS` e
 `NODE_OFFLINE_AFTER_SECONDS`. Il bot non formula ancora consigli di
-irrigazione; recap schedulato, andamento giornaliero della luce e registrazione
-delle irrigazioni sono funzioni delle fasi successive.
+irrigazione; l'andamento giornaliero della luce resta una funzione delle fasi
+successive.
+
+Il recap viene inviato ogni giorno all'ora configurata da `DAILY_RECAP_TIME`
+(predefinita `08:00`) nel fuso `TIMEZONE` (predefinito `Europe/Rome`). Imposta
+facoltativamente `QUIET_HOURS_START` e `QUIET_HOURS_END` per silenziare gli
+avvisi informativi in una fascia, anche notturna; gli alert critici restano
+immediati. Gli amministratori possono modificare ora, fuso e fascia silenziosa
+da Telegram con `Recap e notifiche`; la scelta viene salvata nel database e ha
+precedenza sui valori iniziali di `.env`. Usa `/recap` per visualizzare il
+messaggio in qualunque momento.
 
 ## TODO bot Telegram: configurazione guidata e interfaccia a pulsanti
 
@@ -200,7 +210,7 @@ compatibilità, ma applicano le stesse validazioni.
 - [x] Aggiungere pulsanti per temperatura, umidità, luce e storico del nodo.
 - [x] Aggiungere pulsanti storico `24h` e `7g` dal dettaglio della pianta.
 - [x] Rendere navigabili da pulsanti tutte le piante dell'alberatura, senza
-	dipendere dal comando `/pianta`.
+	dipendere da comandi testuali.
 - [x] Aggiungere navigazione uniforme `Indietro`, `Menu` e `Annulla` a ogni
 	schermata.
 - [x] Gestire callback scadute, nodi scomparsi e dati non più disponibili senza
@@ -219,10 +229,10 @@ compatibilità, ma applicano le stesse validazioni.
 ### Milestone 6: funzioni future
 
 - [x] Aggiungere alert per umidità sotto soglia e nodi offline.
-- [ ] Aggiungere recap schedulato configurabile da pulsanti.
+- [x] Aggiungere recap giornaliero configurabile da ambiente e fascia silenziosa.
 - [ ] Aggiungere andamento giornaliero di temperatura, umidità e luminosità.
-- [ ] Aggiungere registrazione e storico delle irrigazioni quando sarà
-	disponibile l'hardware.
+- [x] Registrare manualmente annaffiature e mantenere aperto l'avviso fino alla
+	conferma dell'utente.
 - [ ] Aggiungere consigli di irrigazione soltanto dopo una validazione sui dati
 	raccolti.
 
