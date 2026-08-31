@@ -135,6 +135,23 @@ class HubTests(unittest.TestCase):
             self.assertIsNone(store.plant_warning("node", 0))
             self.assertEqual(store.last_watering("node", 0), watered_at)
 
+    def test_watering_all_plants_closes_each_warning_and_records_every_plant(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            store.set_plant("node", 0, "Basilico", threshold_percent=60)
+            store.set_plant("node", 1, "Rosmarino", threshold_percent=40)
+            store.open_plant_warning("node", 0)
+            store.open_plant_warning("node", 1)
+
+            count, watered_at = store.record_watering_for_all_plants(42)
+
+            self.assertEqual(count, 2)
+            self.assertIsNone(store.plant_warning("node", 0))
+            self.assertIsNone(store.plant_warning("node", 1))
+            self.assertEqual(store.last_watering("node", 0), watered_at)
+            self.assertEqual(store.last_watering("node", 1), watered_at)
+
     def test_store_updates_threshold_for_configured_plant(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "hub.sqlite3")

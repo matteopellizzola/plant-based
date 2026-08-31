@@ -570,6 +570,29 @@ class Store:
             self.connection.commit()
         return watered_at
 
+    def record_watering_for_all_plants(self, recorded_by: int | None = None) -> tuple[int, str]:
+        """Record one explicit watering event for every configured plant."""
+        watered_at = utc_now()
+        with self.lock:
+            plants = self.connection.execute(
+                "SELECT node, channel FROM plant_metadata ORDER BY node, channel"
+            ).fetchall()
+            if not plants:
+                return 0, watered_at
+            self.connection.executemany(
+                "INSERT INTO plant_watering_history(node, channel, watered_at, recorded_by) VALUES (?, ?, ?, ?)",
+                [(node, channel, watered_at, recorded_by) for node, channel in plants],
+            )
+            self.connection.executemany(
+                "DELETE FROM plant_warnings WHERE node = ? AND channel = ?", plants
+            )
+            self.connection.executemany(
+                "DELETE FROM alert_states WHERE alert_key = ?",
+                [(f"soil-low:{node}:{channel}",) for node, channel in plants],
+            )
+            self.connection.commit()
+        return len(plants), watered_at
+
     def last_watering(self, node: str, channel: int) -> str | None:
         with self.lock:
             row = self.connection.execute(

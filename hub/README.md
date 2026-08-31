@@ -121,7 +121,9 @@ avvisi informativi in una fascia, anche notturna; gli alert critici restano
 immediati. Gli amministratori possono modificare ora, fuso e fascia silenziosa
 da Telegram con `Recap e notifiche`; la scelta viene salvata nel database e ha
 precedenza sui valori iniziali di `.env`. Usa `/recap` per visualizzare il
-messaggio in qualunque momento.
+messaggio in qualunque momento. Il recap contiene anche il pulsante “Ho
+annaffiato tutte le piante”: dopo conferma, registra l'evento per ogni vaso e
+chiude i relativi avvisi di umidità aperti.
 
 ## TODO bot Telegram: configurazione guidata e interfaccia a pulsanti
 

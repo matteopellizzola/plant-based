@@ -32,6 +32,7 @@ PLANT_MOVE_NODE, PLANT_MOVE_CHANNEL, PLANT_MOVE_CONFIRM = range(15, 18)
 USER_ID = 18
 PLANT_WATER_CONFIRM = 19
 RECAP_TIME, RECAP_TIMEZONE, QUIET_HOURS = range(20, 23)
+BULK_WATER_CONFIRM = 23
 
 
 def is_admin(update: Update, settings: Settings) -> bool:
@@ -209,6 +210,7 @@ async def cancel_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     context.user_data.pop("wizard", None)
     context.user_data.pop("plant_action", None)
     context.user_data.pop("conversation_state", None)
+    context.user_data.pop("bulk_watering", None)
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.message.reply_text("Operazione annullata.", reply_markup=main_keyboard())
@@ -1373,6 +1375,13 @@ def daily_recap_text(store: Store, settings: Settings) -> str:
     return text if len(text) <= 4096 else text[:4080] + "\n\n… recap abbreviato. Apri Stato nodi per i dettagli."
 
 
+def daily_recap_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💧 Ho annaffiato tutte le piante", callback_data="recap:water-all")],
+        [InlineKeyboardButton("🌱 Le mie piante", callback_data="menu:plants")],
+    ])
+
+
 async def daily_recap_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.application.bot_data["settings"]
     if is_quiet_hours(settings):
@@ -1383,7 +1392,7 @@ async def daily_recap_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     recipients = set(settings.allowed_user_ids) | set(store.telegram_users())
     for user_id in recipients:
         try:
-            await context.application.bot.send_message(chat_id=user_id, text=text)
+            await context.application.bot.send_message(chat_id=user_id, text=text, reply_markup=daily_recap_keyboard())
         except Exception:
             LOGGER.exception("Invio recap Telegram fallito per user_id=%s", user_id)
 
@@ -1517,7 +1526,7 @@ async def recap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     settings: Settings = context.application.bot_data["settings"]
     store: Store = context.application.bot_data["store"]
-    await update.effective_message.reply_text(daily_recap_text(store, settings), reply_markup=main_keyboard())
+    await update.effective_message.reply_text(daily_recap_text(store, settings), reply_markup=daily_recap_keyboard())
 
 
 async def water_plant(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1537,6 +1546,58 @@ async def water_plant(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     watered_at = store.record_watering(node, channel, user_id)
     await update.effective_message.reply_text(
         f"💧 Annaffiatura registrata per {plant_name} alle {format_local_time(watered_at)}. L'eventuale avviso è stato chiuso."
+    )
+
+
+async def bulk_watering_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    settings: Settings = context.application.bot_data["settings"]
+    store: Store = context.application.bot_data["store"]
+    if not user_allowed(update, settings, store):
+        await query.answer("Accesso non autorizzato.", show_alert=True)
+        return ConversationHandler.END
+    count = len(store.plants())
+    if not count:
+        await query.answer("Non ci sono piante configurate.", show_alert=True)
+        return ConversationHandler.END
+    context.user_data["bulk_watering"] = True
+    await query.answer()
+    await query.message.reply_text(
+        f"Confermi di aver annaffiato tutte le {count} piante configurate?\n"
+        "Saranno registrate tutte e verranno chiusi gli eventuali avvisi aperti.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💧 Conferma annaffiatura completa", callback_data="recap:water-all-confirm")],
+            [InlineKeyboardButton("✖️ Annulla", callback_data="wizard:cancel")],
+        ]),
+    )
+    return BULK_WATER_CONFIRM
+
+
+async def bulk_watering_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    settings: Settings = context.application.bot_data["settings"]
+    store: Store = context.application.bot_data["store"]
+    if not context.user_data.get("bulk_watering") or not user_allowed(update, settings, store):
+        await query.answer("Questa conferma non è più disponibile.", show_alert=True)
+        return ConversationHandler.END
+    user_id = update.effective_user.id if update.effective_user else None
+    count, watered_at = store.record_watering_for_all_plants(user_id)
+    context.user_data.pop("bulk_watering", None)
+    await query.answer()
+    await query.message.reply_text(
+        f"💧 Annaffiatura registrata per tutte le {count} piante alle {format_local_time(watered_at)}. "
+        "Gli avvisi di umidità aperti sono stati chiusi.",
+        reply_markup=main_keyboard(is_admin(update, settings)),
+    )
+    return ConversationHandler.END
+
+
+def build_bulk_watering_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[CallbackQueryHandler(bulk_watering_start, pattern=r"^recap:water-all$")],
+        states={BULK_WATER_CONFIRM: [CallbackQueryHandler(bulk_watering_confirm, pattern=r"^recap:water-all-confirm$")]},
+        fallbacks=[CallbackQueryHandler(cancel_wizard, pattern=r"^wizard:cancel$"), CommandHandler(["annulla", "cancel"], cancel_wizard)],
+        conversation_timeout=900, per_user=True, per_chat=True,
     )
 
 
@@ -1686,6 +1747,7 @@ def main() -> None:
     application.add_handler(build_recap_settings_handler())
     application.add_handler(build_wizard_handler())
     application.add_handler(build_plant_action_handler())
+    application.add_handler(build_bulk_watering_handler())
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
