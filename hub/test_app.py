@@ -1,6 +1,8 @@
 import os
+import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -59,6 +61,46 @@ class HubTests(unittest.TestCase):
             self.assertEqual(summary["maximum"], 240.5)
             self.assertEqual(summary["average"], 180.5)
             self.assertEqual(summary["latest"], 240.5)
+
+    def test_daily_environment_uses_local_day_and_valid_values_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            with patch("core.utc_now", side_effect=[
+                "2026-09-01T22:30:00+00:00",  # 02/09 in Europe/Rome
+                "2026-09-02T10:00:00+00:00",
+                "2026-09-02T12:00:00+00:00",
+            ]):
+                store.save("node", "measurements", {"air": {"valid": True, "temperature_c": 20, "humidity_percent": 40}, "light": {"valid": True, "lux": 100}})
+                store.save("node", "measurements", {"air": {"valid": True, "temperature_c": 24, "humidity_percent": 60}, "light": {"valid": True, "lux": 300}})
+                store.save("node", "measurements", {"air": {"valid": False, "temperature_c": 99}, "light": {"valid": True, "lux": -1}})
+
+            self.assertEqual(store.daily_environment("node", timezone_name="Europe/Rome"), [{
+                "date": "2026-09-02", "temperature": 22, "humidity": 50, "light": 200,
+            }])
+
+    def test_watering_advice_requires_history_then_respects_threshold_and_recent_watering(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "state", {"state": "online"})
+            store.set_plant("node", 0, "Basilico", threshold_percent=35)
+            start = datetime(2026, 9, 1, 10, tzinfo=timezone.utc)
+            rows = [
+                ("node", json.dumps({"soil": [{"channel": 0, "moisture_percent": 50 - index * 1.5}]}), (start + timedelta(days=index)).isoformat())
+                for index in range(14)
+            ]
+            store.connection.executemany(
+                "INSERT INTO measurement_history(node, payload, received_at) VALUES (?, ?, ?)", rows
+            )
+            store.connection.commit()
+            now = datetime(2026, 9, 14, 12, tzinfo=timezone.utc)
+
+            advice = store.watering_advice("node", 0, now=now)
+            self.assertEqual(advice["action"], "water")
+            self.assertEqual(advice["observed_days"], 14)
+
+            with patch("core.utc_now", return_value="2026-09-14T11:00:00+00:00"):
+                store.record_watering("node", 0)
+            self.assertEqual(store.watering_advice("node", 0, now=now)["action"], "wait")
 
     def test_store_saves_node_and_plant_identity(self):
         with tempfile.TemporaryDirectory() as directory:

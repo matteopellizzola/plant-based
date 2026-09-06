@@ -6,12 +6,13 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 try:
-    from app import history_text, node_status_text, sparkline
+    from app import daily_sparkline, history_text, node_status_text, sparkline
     from core import Store
 except ModuleNotFoundError as error:
     history_text = None
     node_status_text = None
     sparkline = None
+    daily_sparkline = None
     Store = None
     IMPORT_ERROR = error
 else:
@@ -45,6 +46,20 @@ class RenderingTests(unittest.TestCase):
             self.assertIn("💡 LUCE", text)
             self.assertIn("🌱 UMIDITÀ TERRENO", text)
             self.assertIn("Andamento:", text)
+
+    def test_weekly_history_includes_daily_environment_charts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "hub.sqlite3")
+            store.save("node", "measurements", {
+                "air": {"valid": True, "temperature_c": 20, "humidity_percent": 45},
+                "light": {"valid": True, "lux": 120},
+            })
+
+            text = history_text(store, "node", "7g")
+
+            self.assertIn("ANDAMENTO GIORNALIERO", text)
+            self.assertIn("🌡️", text)
+            self.assertEqual(daily_sparkline([20, None, 24]), "▁·█")
 
     def test_node_status_text_has_identity_and_sections(self):
         with tempfile.TemporaryDirectory() as directory:

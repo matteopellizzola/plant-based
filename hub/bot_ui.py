@@ -8,6 +8,7 @@ HELP_TEXT = """🌿 Comandi disponibili
 /rinomina VECCHIO | NUOVO - cambia nome a una pianta
 /storico NOME [24h|7g] - andamento recente
 /avvisi - alert e dati non disponibili
+/consigli - consigli prudenti di irrigazione
 /annaffia NOME - registra un'annaffiatura e chiude il relativo avviso
 /recap - mostra ora il recap giornaliero
 
@@ -29,6 +30,7 @@ def main_keyboard(include_user_admin: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🛠️ Calibra sensore", callback_data="wizard:cal:start")],
         [InlineKeyboardButton("🌱 Le mie piante", callback_data="menu:plants")],
         [InlineKeyboardButton("⚠️ Avvisi", callback_data="menu:alerts")],
+        [InlineKeyboardButton("💧 Consigli irrigazione", callback_data="menu:advice")],
         [InlineKeyboardButton("📊 Stato nodi", callback_data="menu:status")],
         [InlineKeyboardButton("❓ Aiuto", callback_data="menu:help")],
     ]

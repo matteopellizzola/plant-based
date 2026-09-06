@@ -601,6 +601,82 @@ class Store:
             ).fetchone()
         return row[0] if row else None
 
+    def watering_advice(
+        self,
+        node: str,
+        channel: int,
+        timezone_name: str = "Europe/Rome",
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Assess one plant conservatively; this never changes configuration or alerts."""
+        plant = self.channel_plant(node, channel)
+        if plant is None:
+            raise ValueError("Pianta non configurata per il canale indicato")
+        _, _, name, _, _, _, threshold = plant
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        zone = ZoneInfo(timezone_name)
+        readings: list[tuple[datetime, float]] = []
+        for _, payload, received_at in self.history(node, limit=10000):
+            soil = payload.get("soil", [])
+            if not isinstance(soil, list):
+                continue
+            value = next(
+                (item.get("moisture_percent") for item in soil
+                 if isinstance(item, dict) and item.get("channel") == channel),
+                None,
+            )
+            if not isinstance(value, (int, float)) or not 0 <= value <= 100:
+                continue
+            try:
+                measured_at = datetime.fromisoformat(received_at)
+            except ValueError:
+                continue
+            if measured_at.tzinfo is None:
+                measured_at = measured_at.replace(tzinfo=timezone.utc)
+            readings.append((measured_at, float(value)))
+
+        observed_days = len({measured_at.astimezone(zone).date() for measured_at, _ in readings})
+        result: dict[str, Any] = {
+            "name": name,
+            "node": node,
+            "channel": channel,
+            "threshold": threshold,
+            "observed_days": observed_days,
+            "required_days": 14,
+            "last_watering": self.last_watering(node, channel),
+            "moisture": readings[-1][1] if readings else None,
+        }
+        if threshold is None:
+            return result | {"action": "configure", "reason": "soglia di umidità non configurata"}
+        if observed_days < 14:
+            return result | {"action": "collecting", "reason": "storico insufficiente"}
+        if not readings:
+            return result | {"action": "unavailable", "reason": "nessuna lettura valida del terreno"}
+
+        latest_age_hours = max(0, (current - readings[-1][0]).total_seconds() / 3600)
+        result["latest_age_hours"] = latest_age_hours
+        if latest_age_hours > 24:
+            return result | {"action": "unavailable", "reason": "ultima lettura del terreno troppo vecchia"}
+
+        last_watering = result["last_watering"]
+        watering_age_hours: float | None = None
+        if last_watering:
+            try:
+                watered_at = datetime.fromisoformat(last_watering)
+                if watered_at.tzinfo is None:
+                    watered_at = watered_at.replace(tzinfo=timezone.utc)
+                watering_age_hours = max(0, (current - watered_at).total_seconds() / 3600)
+            except ValueError:
+                pass
+        result["watering_age_hours"] = watering_age_hours
+        if watering_age_hours is not None and watering_age_hours < 12:
+            return result | {"action": "wait", "reason": "annaffiatura registrata nelle ultime 12 ore"}
+        if result["moisture"] < threshold:
+            return result | {"action": "water", "reason": "umidità sotto la soglia configurata"}
+        return result | {"action": "monitor", "reason": "umidità sopra la soglia configurata"}
+
     def offline_node_alerts(self, after_seconds: int) -> list[tuple[str, str, str]]:
         now = datetime.now(timezone.utc)
         alerts: list[tuple[str, str, str]] = []
@@ -676,6 +752,45 @@ class Store:
             if isinstance(value, (int, float)) and value >= 0:
                 lux_values.append(float(value))
         return self._summary(lux_values, [])
+
+    def daily_environment(
+        self, node: str, since: str | None = None, timezone_name: str = "Europe/Rome"
+    ) -> list[dict[str, str | float | None]]:
+        """Return local-calendar-day averages for air temperature, humidity and light."""
+        zone = ZoneInfo(timezone_name)
+        buckets: dict[str, dict[str, list[float]]] = {}
+        for _, payload, received_at in self.history(node, since):
+            try:
+                timestamp = datetime.fromisoformat(received_at)
+            except ValueError:
+                continue
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            day = timestamp.astimezone(zone).date().isoformat()
+            values = buckets.setdefault(day, {"temperature": [], "humidity": [], "light": []})
+            air = payload.get("air", {})
+            if isinstance(air, dict) and air.get("valid"):
+                temperature = air.get("temperature_c")
+                humidity = air.get("humidity_percent")
+                if isinstance(temperature, (int, float)):
+                    values["temperature"].append(float(temperature))
+                if isinstance(humidity, (int, float)):
+                    values["humidity"].append(float(humidity))
+            light = payload.get("light", {})
+            if isinstance(light, dict) and light.get("valid"):
+                lux = light.get("lux")
+                if isinstance(lux, (int, float)) and lux >= 0:
+                    values["light"].append(float(lux))
+        return [
+            {
+                "date": day,
+                **{
+                    metric: sum(values[metric]) / len(values[metric]) if values[metric] else None
+                    for metric in ("temperature", "humidity", "light")
+                },
+            }
+            for day, values in sorted(buckets.items())
+        ]
 
     @staticmethod
     def _summary(values: list[float], secondary: list[float]) -> dict[str, float | int | None]:

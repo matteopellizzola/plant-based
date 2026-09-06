@@ -96,8 +96,9 @@ come testo finale. Le misure vengono conservate nello storico SQLite oltre alla
 cache dell'ultimo messaggio. `/storico` mostra le statistiche della temperatura
 dell'aria, della luminosita' in lux e, per i vasi configurati, umidita' minima,
 massima, media e ultima lettura nel periodo richiesto. La luminosita' viene
-mostrata solo quando il payload del BH1750 e' valido; durata e andamento
-giornaliero sono ancora da implementare.
+mostrata solo quando il payload del BH1750 e' valido. Nello storico di 7 giorni
+vengono inoltre mostrati tre grafici compatti delle medie giornaliere di
+temperatura, umidità dell'aria e luce; le date rispettano il fuso `TIMEZONE`.
 
 `/avvisi` mostra gli alert per umidità del terreno sotto soglia e segnala i dati
 non disponibili. Un alert di terreno basso resta aperto anche se le letture
@@ -110,9 +111,9 @@ controllo avviene ogni 60 secondi e un messaggio viene inviato solo quando una
 condizione entra in allarme. Un nodo è
 considerato offline dopo 5 minuti senza messaggi; entrambi i valori sono
 configurabili in `hub/.env` con `ALERT_CHECK_INTERVAL_SECONDS` e
-`NODE_OFFLINE_AFTER_SECONDS`. Il bot non formula ancora consigli di
-irrigazione; l'andamento giornaliero della luce resta una funzione delle fasi
-successive.
+`NODE_OFFLINE_AFTER_SECONDS`. Il bot propone consigli di irrigazione solo su
+richiesta e soltanto quando il vaso ha raccolto dati sufficienti; non avvia mai
+un'annaffiatura in automatico.
 
 Il recap viene inviato ogni giorno all'ora configurata da `DAILY_RECAP_TIME`
 (predefinita `08:00`) nel fuso `TIMEZONE` (predefinito `Europe/Rome`). Imposta
@@ -124,6 +125,12 @@ precedenza sui valori iniziali di `.env`. Usa `/recap` per visualizzare il
 messaggio in qualunque momento. Il recap contiene anche il pulsante “Ho
 annaffiato tutte le piante”: dopo conferma, registra l'evento per ogni vaso e
 chiude i relativi avvisi di umidità aperti.
+
+`/consigli` (o il pulsante `Consigli irrigazione`) propone solo indicazioni
+conservative: richiede una soglia configurata e almeno 14 giorni distinti con
+letture valide per ciascun vaso. Non attiva irrigazioni né invia notifiche
+automatiche; quando l'umidità è sotto soglia, spiega il valore rilevato e tiene
+conto di un'annaffiatura registrata nelle 12 ore precedenti.
 
 ## TODO bot Telegram: configurazione guidata e interfaccia a pulsanti
 
@@ -232,11 +239,11 @@ compatibilità, ma applicano le stesse validazioni.
 
 - [x] Aggiungere alert per umidità sotto soglia e nodi offline.
 - [x] Aggiungere recap giornaliero configurabile da ambiente e fascia silenziosa.
-- [ ] Aggiungere andamento giornaliero di temperatura, umidità e luminosità.
+- [x] Aggiungere andamento giornaliero di temperatura, umidità e luminosità.
 - [x] Registrare manualmente annaffiature e mantenere aperto l'avviso fino alla
 	conferma dell'utente.
-- [ ] Aggiungere consigli di irrigazione soltanto dopo una validazione sui dati
-	raccolti.
+- [x] Aggiungere consigli di irrigazione conservativi, dopo almeno 14 giorni di
+	dati raccolti per vaso.
 
 ## Avvio automatico
 

@@ -994,6 +994,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             plant_alerts_text(store), reply_markup=main_keyboard(is_admin(update, settings))
         )
         return
+    if query.data == "menu:advice":
+        await query.message.reply_text(
+            watering_advice_text(store, settings), reply_markup=main_keyboard(is_admin(update, settings))
+        )
+        return
     if query.data == "menu:help":
         await query.message.reply_text(HELP_TEXT, reply_markup=main_keyboard())
         return
@@ -1044,7 +1049,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await query.message.reply_text("Questo storico non è più disponibile.", reply_markup=main_keyboard())
             return
         await query.message.reply_text(
-            history_text(store, node, period) or f"Nessun dato valido per {store.node_name(node)} nel periodo {period}.",
+            history_text(store, node, period, settings.timezone_name) or f"Nessun dato valido per {store.node_name(node)} nel periodo {period}.",
             reply_markup=navigation_keyboard(f"node:{wizard_token(context, node)}", "Dettaglio nodo"),
         )
         return
@@ -1058,7 +1063,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if not any(item[0] == node and str(item[1]) == channel_text for item in store.plants()):
             await query.message.reply_text("Questa pianta non è più disponibile.", reply_markup=main_keyboard())
             return
-        text = history_text(store, node, period)
+        text = history_text(store, node, period, settings.timezone_name)
         await query.message.reply_text(
             text or f"Nessun dato valido per {store.node_name(node)} nel periodo {period}.",
             reply_markup=navigation_keyboard(
@@ -1182,7 +1187,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await query.message.reply_text("Questa azione non è più disponibile.", reply_markup=main_keyboard())
 
 
-def history_text(store: Store, node: str, period: str) -> str | None:
+def history_text(store: Store, node: str, period: str, timezone_name: str = "Europe/Rome") -> str | None:
     since = datetime.now(timezone.utc) - timedelta(hours=24 if period == "24h" else 24 * 7)
     since_text = since.isoformat(timespec="seconds")
     history = store.history(node, since_text)
@@ -1221,6 +1226,16 @@ def history_text(store: Store, node: str, period: str) -> str | None:
         lines.extend(["", "💡 LUCE", f"Minima / media / massima: {light['minimum']:.1f} / {light['average']:.1f} / {light['maximum']:.1f} lux", f"Andamento: {sparkline(light_values)}", f"Letture valide: {light['count']}"])
     else:
         lines.extend(["", "💡 LUCE", "Nessun dato valido"])
+    if period == "7g":
+        daily = store.daily_environment(node, since_text, timezone_name)
+        if daily:
+            lines.extend(["", f"📅 ANDAMENTO GIORNALIERO · medie locali ({timezone_name})"])
+            lines.extend([
+                f"🌡️ {daily_sparkline([item['temperature'] for item in daily])}",
+                f"💧 {daily_sparkline([item['humidity'] for item in daily])}",
+                f"💡 {daily_sparkline([item['light'] for item in daily])}",
+                " · ".join(datetime.fromisoformat(str(item["date"])).strftime("%d/%m") for item in daily),
+            ])
     soil_lines = []
     for plant_node, channel, name, *_ in store.plants():
         if plant_node != node:
@@ -1258,6 +1273,21 @@ def sparkline(values: list[float], width: int = 18) -> str:
     if maximum == minimum:
         return levels[3] * len(values)
     return "".join(levels[round((value - minimum) / (maximum - minimum) * (len(levels) - 1))] for value in values)
+
+
+def daily_sparkline(values: list[float | int | None]) -> str:
+    """Render daily averages while keeping days without readings visible."""
+    valid_values = [float(value) for value in values if isinstance(value, (int, float))]
+    if not valid_values:
+        return "n/d"
+    minimum, maximum = min(valid_values), max(valid_values)
+    levels = "▁▂▃▄▅▆▇█"
+    if minimum == maximum:
+        return "".join("▄" if isinstance(value, (int, float)) else "·" for value in values)
+    return "".join(
+        "·" if not isinstance(value, (int, float)) else levels[round((float(value) - minimum) / (maximum - minimum) * (len(levels) - 1))]
+        for value in values
+    )
 
 
 def node_metric_text(store: Store, node: str, metric: str) -> str:
@@ -1345,6 +1375,40 @@ def plant_alerts_text(store: Store) -> str:
     for kind, name, node, channel, message in alerts:
         marker = "🔴" if kind == "alert" else "ℹ️"
         lines.append(f"{marker} {name} · {message} (A{channel}, {store.node_name(node)})")
+    return "\n".join(lines)
+
+
+def watering_advice_text(store: Store, settings: Settings) -> str:
+    """Render conservative, explainable watering suggestions without sending alerts."""
+    plants = store.plants()
+    if not plants:
+        return "💧 CONSIGLI IRRIGAZIONE\n\nConfigura prima almeno una pianta."
+    now = datetime.now(timezone.utc)
+    priority = {"water": 0, "wait": 1, "monitor": 2, "collecting": 3, "configure": 4, "unavailable": 5}
+    advice = sorted(
+        (store.watering_advice(node, channel, settings.timezone_name, now) for node, channel, *_ in plants),
+        key=lambda item: (priority[item["action"]], item["name"].casefold()),
+    )
+    lines = ["💧 CONSIGLI IRRIGAZIONE", "", "Indicazioni conservative: non viene avviata alcuna irrigazione automatica."]
+    for item in advice:
+        action = item["action"]
+        name = item["name"]
+        if action == "water":
+            age = item.get("watering_age_hours")
+            age_text = f", ultima annaffiatura {age / 24:.1f} giorni fa" if isinstance(age, (int, float)) else ""
+            lines.extend(["", f"🔴 {name}: probabilmente da annaffiare", f"   Umidità {item['moisture']:.1f}% sotto soglia {item['threshold']:.0f}%{age_text}."])
+        elif action == "wait":
+            lines.extend(["", f"🕒 {name}: attendi", "   Hai registrato un'annaffiatura da meno di 12 ore; controlla la prossima lettura."])
+        elif action == "monitor":
+            lines.extend(["", f"✅ {name}: nessuna annaffiatura consigliata", f"   Umidità {item['moisture']:.1f}% sopra soglia {item['threshold']:.0f}%."])
+        elif action == "collecting":
+            remaining = item["required_days"] - item["observed_days"]
+            lines.extend(["", f"📚 {name}: dati ancora in raccolta", f"   {item['observed_days']} giorni con letture valide; ne servono almeno 14 ({remaining} rimanenti)."])
+        elif action == "configure":
+            lines.extend(["", f"⚙️ {name}: imposta una soglia", "   Senza soglia del terreno non posso formulare un consiglio affidabile."])
+        else:
+            lines.extend(["", f"ℹ️ {name}: dati del terreno non disponibili", "   Controlla che il sensore e il canale siano configurati correttamente."])
+    lines.extend(["", "Le soglie restano sotto il tuo controllo; registra sempre l'annaffiatura per migliorare lo storico."])
     return "\n".join(lines)
 
 
@@ -1465,6 +1529,7 @@ async def configure_command_menu(application: Application) -> None:
             BotCommand("storico", "mostra l'andamento recente"),
             BotCommand("avvisi", "mostra alert e dati non disponibili"),
             BotCommand("annaffia", "registra un'annaffiatura"),
+            BotCommand("consigli", "mostra consigli di irrigazione"),
             BotCommand("recap", "mostra il recap giornaliero"),
             BotCommand("calibra", "imposta una calibrazione"),
             BotCommand("cal", "imposta una calibrazione"),
@@ -1519,6 +1584,16 @@ async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     store: Store = context.application.bot_data["store"]
     await update.effective_message.reply_text(plant_alerts_text(store), reply_markup=main_keyboard())
+
+
+async def watering_advice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await deny_unless_allowed(update, context):
+        return
+    settings: Settings = context.application.bot_data["settings"]
+    store: Store = context.application.bot_data["store"]
+    await update.effective_message.reply_text(
+        watering_advice_text(store, settings), reply_markup=main_keyboard(is_admin(update, settings))
+    )
 
 
 async def recap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1652,7 +1727,8 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     matches = store.find_plants(target)
     node = matches[0][0] if len(matches) == 1 else context.args[0]
     period = context.args[1] if len(context.args) > 1 else "24h"
-    text = history_text(store, node, period)
+    settings: Settings = context.application.bot_data["settings"]
+    text = history_text(store, node, period, settings.timezone_name)
     if text is None:
         await update.effective_message.reply_text(f"Nessun dato valido per {store.node_name(node)} nel periodo {period}.")
         return
@@ -1754,6 +1830,7 @@ def main() -> None:
     application.add_handler(CommandHandler("avvisi", alerts))
     application.add_handler(CommandHandler("recap", recap))
     application.add_handler(CommandHandler("annaffia", water_plant))
+    application.add_handler(CommandHandler("consigli", watering_advice))
     application.add_handler(CommandHandler("rinomina", rename_plant))
     application.add_handler(CommandHandler(["cal", "calibra"], set_calibration))
     application.add_handler(CommandHandler("node", set_node_name))
